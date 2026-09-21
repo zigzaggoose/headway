@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"math/rand/v2"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -17,6 +18,7 @@ import (
 
 	"github.com/zigzaggoose/headway"
 	"github.com/zigzaggoose/headway/internal/config"
+	"github.com/zigzaggoose/headway/internal/gtfsrt"
 	"github.com/zigzaggoose/headway/internal/store"
 )
 
@@ -356,4 +358,101 @@ func waitFor(t *testing.T, cond func() bool, what string) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatalf("timed out waiting for %s", what)
+}
+
+// Replaying a recorded feed response writes it once, at the scale the service
+// actually runs at: 3,939 updates from a real capture, submitted twice through
+// cold pipelines as a restart would. §9.3 case 2 says the burst after a
+// restart is correct and idempotent; this asserts it on real data rather than
+// on a handful of synthetic rows.
+func TestPipeline_ReplayingARecordedResponse_WritesItOnce(t *testing.T) {
+	pool := testPool(t)
+	body, err := os.ReadFile(filepath.Join("..", "..", "testdata", "sydneytrains_tripupdate_0001.pb"))
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+	decoded, err := gtfsrt.Decode("sydneytrains", body, time.Now())
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(decoded.Updates) < 1000 {
+		t.Fatalf("fixture has %d updates; this test is about scale", len(decoded.Updates))
+	}
+
+	// Two independent pipelines, each with an empty filter, exactly as two
+	// runs of the process would have.
+	//
+	// The queue is the production default. One poll submits every update in a
+	// burst, so a queue smaller than a poll's worth drops the difference by
+	// design — INGEST_QUEUE_SIZE has to exceed the updates in one poll, and
+	// this fixture is what "one poll" actually means: 3,939 of them.
+	submitAll := func() *Pipeline {
+		p := newTestPipeline(t, pool, PipelineConfig{
+			QueueSize: 8192, BatchSize: 500, FlushInterval: 20 * time.Millisecond,
+		})
+		for _, u := range decoded.Updates {
+			p.Submit(observationFrom(u))
+		}
+		if err := p.Close(20 * time.Second); err != nil {
+			t.Fatalf("close: %v", err)
+		}
+		if dropped := p.Stats().Dropped; dropped != 0 {
+			t.Fatalf("%d observations were dropped by a queue sized for a whole poll", dropped)
+		}
+		return p
+	}
+
+	// Every (trip_id, stop_id) in a single feed message is distinct, so every
+	// decoded update must become a row: anything less means the key is
+	// colliding on data the feed considers separate.
+	first := submitAll()
+	afterFirst := rows(t, pool)
+	if afterFirst != len(decoded.Updates) {
+		t.Fatalf("%d updates produced %d rows; the key is discarding distinct observations",
+			len(decoded.Updates), afterFirst)
+	}
+	if first.Stats().Failed != 0 {
+		t.Fatalf("%d rows failed to write", first.Stats().Failed)
+	}
+
+	second := submitAll()
+	afterSecond := rows(t, pool)
+
+	if afterSecond != afterFirst {
+		t.Errorf("replay added %d rows; the natural key is not absorbing it", afterSecond-afterFirst)
+	}
+	if second.Stats().Conflicts == 0 {
+		t.Error("the replay reported no conflicts, so it cannot have written the same rows")
+	}
+	t.Logf("%d updates -> %d rows; replay wrote 0 new rows and reported %d conflicts",
+		len(decoded.Updates), afterFirst, second.Stats().Conflicts)
+}
+
+// observationFrom is the unmatched conversion of §9.1 order 4: no schedule is
+// loaded, so the delay is whatever the producer supplied. The real conversion
+// lives in internal/match from Stage 2.
+func observationFrom(u gtfsrt.RawUpdate) Observation {
+	o := Observation{
+		ServiceDate:     u.HeaderTS.Truncate(24 * time.Hour),
+		FeedID:          u.FeedID,
+		TripID:          u.TripID,
+		StopID:          u.StopID,
+		FeedTS:          u.HeaderTS,
+		RouteID:         u.RouteID,
+		ArrivalDelayS:   u.ArrivalDelay,
+		DepartureDelayS: u.DepartureDelay,
+		TripRel:         u.TripRel,
+		StopTimeRel:     u.StopTimeRel,
+		VehicleID:       u.VehicleID,
+	}
+	switch {
+	case u.DepartureDelay != nil:
+		o.ObservedDelayS = u.DepartureDelay
+	case u.ArrivalDelay != nil:
+		o.ObservedDelayS = u.ArrivalDelay
+	}
+	if u.TripLevel {
+		o.StopID = "~trip"
+	}
+	return o
 }
