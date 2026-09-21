@@ -304,10 +304,12 @@ headway/
 │   │   ├── delay.go                  Delay derivation and the on-time classification.
 │   │   └── matcher_test.go
 │   ├── ingest/
+│   │   ├── observation.go            The Observation type and its key.
 │   │   ├── filter.go                 Change filter (5).
 │   │   ├── writer.go                 Batch writer (6).
 │   │   ├── pipeline.go               Channel wiring and shutdown ordering.
-│   │   └── writer_test.go
+│   │   ├── filter_test.go
+│   │   └── writer_integration_test.go  Tagged `//go:build integration`. Holds TestShutdownFlushesPendingBatch.
 │   ├── cache/
 │   │   ├── latest.go                 Latest-state cache (8).
 │   │   └── latest_test.go
@@ -528,6 +530,11 @@ CREATE TABLE observations (
     ingested_at       timestamptz NOT NULL DEFAULT now(),
 
     PRIMARY KEY (service_date, feed_id, trip_id, stop_sequence, feed_ts)
+    -- SUPERSEDED by migrations/0005: the key is now
+    --   (service_date, feed_id, trip_id, stop_id, feed_ts)
+    -- and stop_sequence is nullable. The TfNSW feeds never send stop_sequence
+    -- (measured: 0 of 3,836 updates), so an unmatched observation can never
+    -- have one, and unmatched observations must be storable. Open Question 11.
 ) PARTITION BY RANGE (service_date);
 
 -- A default partition means a write for an unexpected service_date never fails.
@@ -543,7 +550,7 @@ Index reasoning for `observations`:
 
 | Index | Why it exists | Why not something else |
 |---|---|---|
-| `PRIMARY KEY (service_date, feed_id, trip_id, stop_sequence, feed_ts)` | It *is* the idempotency key — `ON CONFLICT DO NOTHING` needs a unique constraint over exactly these columns. It also serves "everything that happened on trip T today" in one range scan. | A `bigserial` surrogate key plus a separate unique index costs the same bytes and buys nothing. |
+| `PRIMARY KEY (service_date, feed_id, trip_id, stop_id, feed_ts)` — `stop_sequence` since `migrations/0005` | It *is* the idempotency key — `ON CONFLICT DO NOTHING` needs a unique constraint over exactly these columns. It also serves "everything that happened on trip T today" in one range scan. `stop_id` replaces `stop_sequence` because the feed never sends the latter. | A `bigserial` surrogate key plus a separate unique index costs the same bytes and buys nothing. Keeping `stop_sequence` in the key would make every unmatched observation unstorable. |
 | `CREATE INDEX obs_by_stop ON observations (service_date, stop_id, feed_ts);` — created per partition by the maintenance job | Backs "raw observations for stop S on date D", which the rollup job and the drill-down view use. | A global index on the parent is not possible; Postgres creates a matching index on each partition automatically when you index the parent, so index the **parent** once and let Postgres propagate. |
 | *No* index on `route_id` | The rollup reads a whole day's partition and aggregates; a sequential scan of one day's partition is faster than an index scan over most of it. Historical route queries hit `otp_route_hourly`, not this table. | Adding it would grow the hot write path for a query that never runs against raw data. Revisit only if a measured query needs it. |
 
@@ -1444,7 +1451,7 @@ Each stage ends in something that runs and can be demonstrated. **Stage 2 is the
 - [x] `internal/feed`: one poller, shared limiter, conditional requests where the upstream supports them (schedule only — §9.5 case 9), all the HTTP status cases in §9.5. Verified against the live feed: four polls in 50 s at 15 s + jitter, ordered shutdown, 4 requests spent.
 - [x] `internal/gtfsrt`: decode to `RawUpdate`. All nil handling here. 93.2 % covered; the feed-shape findings are recorded in §9.1.
 - [x] `cmd/fixturedump`: capture two consecutive live responses into `testdata/`, plus `derive` for the cancelled, added, past-midnight and truncated fixtures.
-- [ ] `internal/ingest`: bounded channel, change filter, batch writer with `ON CONFLICT DO NOTHING`.
+- [x] `internal/ingest`: bounded channel, change filter, batch writer with `ON CONFLICT DO NOTHING`. 95.8 % covered. Not yet wired into `main`: an Observation needs a service date, which needs `internal/servicetime`.
 - [ ] `internal/cache`: latest-state cache.
 - [ ] `internal/api`: `/v1/lines/{id}/now` (unmatched-only fields), `/healthz`, `/readyz`.
 - [ ] Ordered graceful shutdown per §9.4.
@@ -1682,6 +1689,11 @@ Append-only. To reverse a decision, add a row that names the one it supersedes.
 | 2026-09-21 | An update with no times is dropped only when it is a plain SCHEDULED stop on a normal trip; SKIPPED, NO_DATA, and any stop on a cancelled or added trip are kept. Refines §9.1 case 6. | The relationship is itself the information. Dropping every timeless update, as the original rule read, would make `n_skipped` and `n_cancelled` permanently zero in the rollup — the two columns that exist to count exactly these. | Dropping all timeless updates (silently zeroes two rollup columns); keeping all of them (a scheduled stop with no time repeats what the timetable already says). |
 | 2026-09-21 | `DecodedFeed.Dropped` is `map[DropReason]int`, not the `int` §4.2 specified. | The metric is `headway_updates_dropped_total{reason}` (§10.3); a single count would have to be re-derived to be useful, and the reason is what tells a stale schedule apart from a malformed feed. | A plain count (loses the label the alert needs). |
 | 2026-09-21 | Schedule-relationship constants are untyped-by-design `int32` names, not a Go enum type. | Confirms the earlier decision with evidence: 18.5 % of live updates carry `REPLACEMENT` (5), which the current specification removed. A typed enum with an exhaustive switch would mis-bucket or reject nearly a fifth of this feed. | A Go enum type with a `default` case (works, but invites an exhaustive switch in the next package). |
+| 2026-09-21 | Observations are keyed on `stop_id` rather than `stop_sequence`; `stop_sequence` becomes a nullable column filled from the timetable. Answers Open Question 11; applied as `migrations/0005`, leaving `0002` untouched. | The feed never sends `stop_sequence` (0 of 3,836 measured), so it can only come from the timetable — which an unmatched observation has no access to. Unmatched observations must be storable because the unmatched rate is the matcher's health signal. | A sentinel `stop_sequence` for unmatched rows (every unmatched stop on a trip collides, and in Stage 1 that is every stop); a synthetic per-message ordinal (shifts when the producer omits earlier stops, so the same stop changes key between polls and the filter stops suppressing). |
+| 2026-09-21 | A batch is one `INSERT ... SELECT * FROM unnest(...) ON CONFLICT DO NOTHING` statement. | One statement means the batch succeeds or fails whole with no per-row error handling (§10.1), and one round trip rather than one per row. `CopyFrom` is faster still but cannot express `ON CONFLICT`, and idempotency is worth more here than the difference. | `pgx.Batch` of single-row inserts (a round trip's worth of parsing per row); `CopyFrom` into a temporary table then insert-select (two statements and a temporary table per batch, for a gain worth measuring only if the writer ever becomes the bottleneck). |
+| 2026-09-21 | An observation dropped by a full queue is forgotten by the change filter. | The filter records a value as written when it admits it. If a full queue then discards it, leaving that record in place suppresses the *next* identical observation too — so one full queue loses the value until it next changes, not for one poll. Forgetting costs one redundant write and bounds the damage to the observation actually dropped. | Filtering after the queue (a redundant observation would then occupy queue space, which is exactly what the filter exists to prevent); leaving the record (turns a transient drop into a lasting gap). |
+| 2026-09-21 | The change filter's key holds the service date as a formatted `YYYY-MM-DD` string, not a `time.Time`. | A `time.Time` carries a location pointer and a monotonic reading, so two values naming the same day can compare unequal. In a map key that is a filter which silently stops suppressing — the most expensive possible failure of this component. | `time.Time` in the key (unequal for equal days); truncating to midnight UTC (wrong: a service date is a local-calendar concept, not an instant). |
+| 2026-09-21 | Filter eviction removes a tenth of the map, oldest first, when the bound is reached. | The scan is then amortised over many admissions instead of running on every one past the bound. Eviction costs a redundant write the next time that key appears and never produces a wrong row, so approximate is good enough. | Exact LRU (a linked list and a second map, to decide which redundant write to pay for); evicting one entry per admission (a full sort per observation at the bound). |
 
 ---
 
@@ -1700,7 +1712,7 @@ Each needs the human's input. Each has a default that will be used until it is a
 | 7 | **Retention window.** 14 days is a guess made before measuring. | 14 days. Revisit once `docs/storage.md` has a real bytes-per-day figure. |
 | 8 | **Custom domain?** Roughly $15–25 AUD/year, plus TLS to configure. | No domain. Serve on the VM's IP over HTTP for the demo, or put Caddy in front if a domain is bought later. Not on the Stage 1–3 critical path. |
 | 9 | **Should vehicle positions be ingested at all?** They would allow a map and a "where is the train" view, at roughly double the quota cost and a second table. | No. Explicitly a non-goal for v1 (§2). Revisit only after Stage 4 is complete. |
-| 11 | **The observations primary key includes `stop_sequence`, and the feed never sends one.** Order-1 and order-2 matches can take it from the timetable, but an unmatched update (order 4) has no `stop_sequence` and no way to get one — and the column is `NOT NULL` and part of the key. Writing unmatched observations is what tells us the match rate is falling (§15), so they must be storable. The options: a sentinel `stop_sequence` for unmatched rows, which collides when one trip has several unmatched stops; swapping `stop_id` for `stop_sequence` in the key, which collides when a trip visits one stop twice; or adding a synthetic per-update ordinal. This changes `migrations/0002`, so it needs a decision before the matcher is written. | None yet — the matcher is Stage 2. Recommendation: key on `(service_date, feed_id, trip_id, stop_id, feed_ts)` and keep `stop_sequence` as a nullable non-key column, because a loop service revisiting a stop within one feed timestamp is rarer than an unmatched update, and the loop case is detectable (§9.1 case 9 already flags it as ambiguous). |
+| 11 | **ANSWERED 2026-09-21 — see the Decision Log.** The observations primary key included `stop_sequence`, and the feed never sends one. Order-1 and order-2 matches can take it from the timetable, but an unmatched update (order 4) has no `stop_sequence` and no way to get one — and the column is `NOT NULL` and part of the key. Writing unmatched observations is what tells us the match rate is falling (§15), so they must be storable. The options: a sentinel `stop_sequence` for unmatched rows, which collides when one trip has several unmatched stops; swapping `stop_id` for `stop_sequence` in the key, which collides when a trip visits one stop twice; or adding a synthetic per-update ordinal. This changes `migrations/0002`, so it needs a decision before the matcher is written. | **Decided:** key on `(service_date, feed_id, trip_id, stop_id, feed_ts)`, `stop_sequence` nullable, applied in `migrations/0005`. The cost — a loop service losing its second visit within one feed timestamp — is asserted by `TestWriter_LoopService_LosesTheSecondVisitInOneFeedTimestamp` rather than left to be discovered. |
 | 10 | **Is the repository public?** It affects whether GitHub Actions minutes are free and whether the API key can ever appear in a CI log. | Public. Therefore: no secrets in CI logs, no live API calls in CI, and `.env` stays in `.gitignore` from the first commit. |
 
 ---
