@@ -22,9 +22,31 @@ type Filter struct {
 	entries map[Key]entry
 	seq     uint64 // insertion order, for oldest-first eviction
 
+	// Guarded by mu, like everything else here: exported counters beside an
+	// unexported mutex invite a caller to read them without holding it.
+	suppressed uint64
+	admitted   uint64
+	evicted    uint64
+}
+
+// FilterStats is a snapshot of what the filter has decided.
+type FilterStats struct {
 	Suppressed uint64
 	Admitted   uint64
 	Evicted    uint64
+	Entries    int
+}
+
+// Stats reports the filter's counters and current size.
+func (f *Filter) Stats() FilterStats {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return FilterStats{
+		Suppressed: f.suppressed,
+		Admitted:   f.admitted,
+		Evicted:    f.evicted,
+		Entries:    len(f.entries),
+	}
 }
 
 // entry is the last value written for a key. Only the fields a query can
@@ -69,7 +91,7 @@ func (f *Filter) Admit(o Observation) bool {
 
 	prev, seen := f.entries[k]
 	if seen && !changed(prev, now, f.minDelta) {
-		f.Suppressed++
+		f.suppressed++
 		return false
 	}
 
@@ -79,7 +101,7 @@ func (f *Filter) Admit(o Observation) bool {
 	f.seq++
 	now.seq = f.seq
 	f.entries[k] = now
-	f.Admitted++
+	f.admitted++
 	return true
 }
 
@@ -115,7 +137,7 @@ func (f *Filter) ExpireBefore(serviceDate time.Time) int {
 			n++
 		}
 	}
-	f.Evicted += uint64(n)
+	f.evicted += uint64(n)
 	return n
 }
 
@@ -123,13 +145,16 @@ func (f *Filter) ExpireBefore(serviceDate time.Time) int {
 // admitted rather than suppressed. It exists for the queue-full path: an
 // observation the filter recorded but the queue refused was never written, and
 // leaving the record in place would suppress its replacement.
+//
+// It does not adjust the admitted counter. "Admitted" means "passed the change
+// filter", which this observation did; the queue refusing it afterwards is a
+// different event with its own counter. Decrementing here would also undercount
+// whenever the entry being forgotten belongs to a later admission than the one
+// that was dropped.
 func (f *Filter) Forget(k Key) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if _, ok := f.entries[k]; ok {
-		delete(f.entries, k)
-		f.Admitted--
-	}
+	delete(f.entries, k)
 }
 
 // Len is the number of keys currently remembered.
@@ -157,7 +182,7 @@ func (f *Filter) evictOldestLocked() {
 	for _, a := range all[:drop] {
 		delete(f.entries, a.key)
 	}
-	f.Evicted += uint64(drop)
+	f.evicted += uint64(drop)
 }
 
 func abs32(v int32) int32 {

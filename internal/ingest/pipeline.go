@@ -110,6 +110,13 @@ func (p *Pipeline) Close(grace time.Duration) error {
 	p.closeOnce.Do(func() {
 		close(p.ch)
 
+		// Close before Start is a startup that aborted between building the
+		// pipeline and launching the writer. There is nothing to wait for, and
+		// waiting would block forever on a WaitGroup nobody added to.
+		if p.cancelWriter == nil {
+			return
+		}
+
 		done := make(chan struct{})
 		go func() {
 			p.wg.Wait()
@@ -147,23 +154,23 @@ type Stats struct {
 	FilterSize int
 }
 
-// Stats reports what the pipeline has done.
+// Stats reports what the pipeline has done. It is safe to call while the
+// writer is running, which is the only time anyone wants it.
 func (p *Pipeline) Stats() Stats {
-	p.filter.mu.Lock()
-	suppressed, admitted, size := p.filter.Suppressed, p.filter.Admitted, len(p.filter.entries)
-	p.filter.mu.Unlock()
+	f := p.filter.Stats()
+	w := p.writer.Stats()
 
 	return Stats{
 		QueueLen:   len(p.ch),
 		QueueCap:   cap(p.ch),
 		Dropped:    p.dropped.Load(),
-		Suppressed: suppressed,
-		Admitted:   admitted,
-		Written:    p.writer.Written,
-		Failed:     p.writer.Failed,
-		Batches:    p.writer.Batches,
-		Conflicts:  p.writer.Conflicts,
-		FilterSize: size,
+		Suppressed: f.Suppressed,
+		Admitted:   f.Admitted,
+		Written:    w.Written,
+		Failed:     w.Failed,
+		Batches:    w.Batches,
+		Conflicts:  w.Conflicts,
+		FilterSize: f.Entries,
 	}
 }
 

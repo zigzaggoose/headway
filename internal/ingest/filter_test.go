@@ -39,8 +39,8 @@ func TestFilter_SuppressesTheUnchangedAndAdmitsTheRest(t *testing.T) {
 	if !f.Admit(obs("t2", "s1", i32(60))) {
 		t.Error("a different trip was suppressed")
 	}
-	if f.Suppressed != 1 || f.Admitted != 4 {
-		t.Errorf("suppressed=%d admitted=%d", f.Suppressed, f.Admitted)
+	if f.Stats().Suppressed != 1 || f.Stats().Admitted != 4 {
+		t.Errorf("suppressed=%d admitted=%d", f.Stats().Suppressed, f.Stats().Admitted)
 	}
 }
 
@@ -61,7 +61,7 @@ func TestFilter_APunctualTrainWritesOneRowPerStop(t *testing.T) {
 	if admitted != 20 {
 		t.Errorf("%d rows for 20 stops over %d polls, want 20", admitted, polls)
 	}
-	if ratio := float64(f.Suppressed) / float64(f.Suppressed+f.Admitted); ratio < 0.99 {
+	if ratio := float64(f.Stats().Suppressed) / float64(f.Stats().Suppressed+f.Stats().Admitted); ratio < 0.99 {
 		t.Errorf("suppression ratio %.3f", ratio)
 	}
 }
@@ -157,7 +157,7 @@ func TestFilter_MaxEntries_EvictsOldestFirst(t *testing.T) {
 	if got := f.Len(); got > max {
 		t.Errorf("filter holds %d keys, want at most %d", got, max)
 	}
-	if f.Evicted == 0 {
+	if f.Stats().Evicted == 0 {
 		t.Error("nothing was recorded as evicted")
 	}
 
@@ -214,7 +214,7 @@ func TestFilter_ConcurrentAdmits_AreCountedExactlyOnce(t *testing.T) {
 	for range 20 {
 		<-done
 	}
-	if f.Admitted != 2000 || f.Len() != 2000 {
-		t.Errorf("admitted=%d len=%d, want 2000 each", f.Admitted, f.Len())
+	if st := f.Stats(); st.Admitted != 2000 || st.Entries != 2000 {
+		t.Errorf("admitted=%d entries=%d, want 2000 each", f.Stats().Admitted, f.Stats().Entries)
 	}
 }

@@ -125,8 +125,8 @@ func TestWriter_WritesABatchAndIsIdempotent(t *testing.T) {
 
 	w := NewWriter(pool, nil, WriterConfig{BatchSize: 500, FlushInterval: time.Second}, slog.New(slog.DiscardHandler))
 	w.writeBatch(context.Background(), batch, "test")
-	if w.Written != 200 {
-		t.Fatalf("wrote %d rows, want 200 (failed=%d)", w.Written, w.Failed)
+	if w.Stats().Written != 200 {
+		t.Fatalf("wrote %d rows, want 200 (failed=%d)", w.Stats().Written, w.Stats().Failed)
 	}
 
 	// Replaying the same feed response must write nothing the second time.
@@ -134,8 +134,8 @@ func TestWriter_WritesABatchAndIsIdempotent(t *testing.T) {
 	if got := rows(t, pool); got != 200 {
 		t.Errorf("%d rows after a replay, want 200", got)
 	}
-	if w.Conflicts != 200 {
-		t.Errorf("conflicts = %d, want 200", w.Conflicts)
+	if w.Stats().Conflicts != 200 {
+		t.Errorf("conflicts = %d, want 200", w.Stats().Conflicts)
 	}
 }
 
@@ -159,8 +159,8 @@ func TestWriter_UnknownValues_AreStoredAsNull(t *testing.T) {
 
 	w := NewWriter(pool, nil, WriterConfig{}, slog.New(slog.DiscardHandler))
 	w.writeBatch(context.Background(), []Observation{unmatched}, "test")
-	if w.Written != 1 {
-		t.Fatalf("wrote %d rows (failed=%d)", w.Written, w.Failed)
+	if w.Stats().Written != 1 {
+		t.Fatalf("wrote %d rows (failed=%d)", w.Stats().Written, w.Stats().Failed)
 	}
 
 	var routeID, vehicleID *string
@@ -340,11 +340,11 @@ func TestWriter_FailedBatch_IsCountedAndDropped(t *testing.T) {
 	w := NewWriter(pool, nil, WriterConfig{}, slog.New(slog.DiscardHandler))
 	w.writeBatch(context.Background(), []Observation{sample("t", "s", 1, ts)}, "test")
 
-	if w.Failed != 1 {
-		t.Errorf("failed = %d, want 1", w.Failed)
+	if w.Stats().Failed != 1 {
+		t.Errorf("failed = %d, want 1", w.Stats().Failed)
 	}
-	if w.Written != 0 {
-		t.Errorf("written = %d, want 0", w.Written)
+	if w.Stats().Written != 0 {
+		t.Errorf("written = %d, want 0", w.Stats().Written)
 	}
 }
 

@@ -3,6 +3,7 @@ package ingest
 import (
 	"context"
 	"log/slog"
+	"sync/atomic"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -49,16 +50,49 @@ type Writer struct {
 	cfg  WriterConfig
 	log  *slog.Logger
 
+	// Read by /v1/admin/stats and the metrics collectors while this goroutine
+	// is writing, so they are atomic rather than plain counters. Reading them
+	// unsynchronised was a data race in the one place an operator looks when
+	// something is wrong.
+	written   atomic.Uint64
+	failed    atomic.Uint64
+	batches   atomic.Uint64
+	conflicts atomic.Uint64
+}
+
+// WriterStats is a snapshot for an operator. Each counter is read atomically,
+// though not all four at one instant: nothing depends on them agreeing, and a
+// lock here would put the reporting path inside the write path.
+type WriterStats struct {
 	Written   uint64
 	Failed    uint64
 	Batches   uint64
 	Conflicts uint64
 }
 
+// Stats reports what the writer has done. Safe to call while it is running.
+func (w *Writer) Stats() WriterStats {
+	return WriterStats{
+		Written:   w.written.Load(),
+		Failed:    w.failed.Load(),
+		Batches:   w.batches.Load(),
+		Conflicts: w.conflicts.Load(),
+	}
+}
+
 // NewWriter wires a writer to its input channel.
 func NewWriter(pool *pgxpool.Pool, in <-chan Observation, cfg WriterConfig, log *slog.Logger) *Writer {
+	// A zero interval panics time.NewTicker, and a zero batch size flushes on
+	// every row. config validates both, but a caller building a WriterConfig
+	// by hand should get a working writer rather than a panic at Start.
 	if cfg.WriteTimeout <= 0 {
 		cfg.WriteTimeout = 10 * time.Second
+	}
+	if cfg.FlushInterval <= 0 {
+		cfg.FlushInterval = 2 * time.Second
+	}
+	if cfg.BatchSize <= 0 {
+		cfg.BatchSize = 500
 	}
 	return &Writer{pool: pool, in: in, cfg: cfg, log: log.With("component", "ingest")}
 }
@@ -90,7 +124,7 @@ func (w *Writer) Run(ctx context.Context) error {
 				// is step 5 of the shutdown sequence, and the flush below is
 				// the whole point of the ordering.
 				flush("shutdown")
-				w.log.Info("writer stopped", "rows_written", w.Written, "batches", w.Batches)
+				w.log.Info("writer stopped", "rows_written", w.written.Load(), "batches", w.batches.Load())
 				return nil
 			}
 			batch = append(batch, o)
@@ -135,7 +169,7 @@ func (w *Writer) writeBatch(ctx context.Context, batch []Observation, reason str
 		return nil
 	})
 	if err != nil {
-		w.Failed += uint64(len(batch))
+		w.failed.Add(uint64(len(batch)))
 		w.log.Error("batch write failed",
 			"rows", len(batch),
 			"reason", reason,
@@ -144,11 +178,11 @@ func (w *Writer) writeBatch(ctx context.Context, batch []Observation, reason str
 		return
 	}
 
-	w.Batches++
-	w.Written += uint64(inserted)
+	w.batches.Add(1)
+	w.written.Add(uint64(inserted))
 	// The difference is rows the natural key already held: a replay, or two
 	// pollers' worth of the same feed timestamp. Expected, and worth counting.
-	w.Conflicts += uint64(len(batch)) - uint64(inserted)
+	w.conflicts.Add(uint64(len(batch)) - uint64(inserted))
 
 	w.log.Debug("batch written",
 		"rows", len(batch),
