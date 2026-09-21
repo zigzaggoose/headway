@@ -1,0 +1,16 @@
+# The build stage needs go.mod, go.sum, cmd/, internal/ and migrations/.
+# Everything below either bloats the context or must never reach an image layer.
+.env
+.git
+.github
+.gitignore
+.claude
+bin/
+docs/
+deploy/
+web/
+testdata/
+*.md
+*.out
+*.test
+*.prof

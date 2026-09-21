@@ -1,0 +1,3 @@
+-- Indexes added after measuring, per PROJECT.md §6.2. Deliberately empty: the
+-- indexes that exist today are the ones the DDL in 0001-0003 already justifies,
+-- and an index added before a query needs it only slows the write path.

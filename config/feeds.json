@@ -1,0 +1,12 @@
+{
+  "feeds": [
+    {
+      "id": "sydneytrains",
+      "label": "Sydney Trains",
+      "realtime_url": "https://api.transport.nsw.gov.au/v2/gtfs/realtime/sydneytrains",
+      "schedule_url": "https://api.transport.nsw.gov.au/v1/gtfs/schedule/sydneytrains",
+      "route_type": 2,
+      "enabled": true
+    }
+  ]
+}

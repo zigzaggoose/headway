@@ -1,0 +1,20 @@
+# Secrets. The API key lives here in development and must never be committed.
+.env
+
+# Build output.
+/bin/
+/headway
+
+# Test and profiling artefacts.
+*.out
+*.test
+*.prof
+
+# Stage 4 front end.
+/web/node_modules/
+/web/.next/
+
+# Editor and OS noise.
+.DS_Store
+.idea/
+*.swp
