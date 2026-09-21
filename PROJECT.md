@@ -253,6 +253,8 @@ Everything above runs in **one process** (`cmd/headway`). The numbers are packag
 ```
 headway/
 ├── PROJECT.md                        This file. Source of truth.
+├── CLAUDE.md                         Persistent instructions for Claude. The subset of this file needed every session.
+├── HANDOFF.md                        Current session state. Transient; delete when stale.
 ├── README.md                         Short: what it is, how to run it, a screenshot.
 ├── embed.go                          //go:embed migrations/*.sql. No logic; embed cannot reach out of its own directory.
 ├── go.mod                            Module github.com/<you>/headway, go 1.27.
@@ -309,6 +311,7 @@ headway/
 │   │   ├── writer.go                 Batch writer (6).
 │   │   ├── pipeline.go               Channel wiring and shutdown ordering.
 │   │   ├── filter_test.go
+│   │   ├── pipeline_integration_test.go
 │   │   └── writer_integration_test.go  Tagged `//go:build integration`. Holds TestShutdownFlushesPendingBatch.
 │   ├── cache/
 │   │   ├── latest.go                 Latest-state cache (8).
@@ -949,9 +952,11 @@ type Observation struct {
     ServiceDate     time.Time
     FeedID          string
     TripID          string
-    StopSequence    int32
-    FeedTS          time.Time
     StopID          string
+    FeedTS          time.Time
+    // Nullable since migrations/0005: it can only come from the timetable,
+    // and the feed never sends it. Not part of the key.
+    StopSequence    *int32
     RouteID         string   // "" when unmatched
     DirectionID     *int16
     ArrivalDelayS   *int32
@@ -966,10 +971,15 @@ type Observation struct {
 // Key is the idempotency key and the change-filter key.
 func (o Observation) Key() Key
 
-type Filter interface{ Admit(Observation) bool }
+// Filter is a concrete type, not an interface: there is one implementation
+// and no second one in prospect.
+type Filter struct{ /* ... */ }
+func (f *Filter) Admit(Observation) bool
+func (f *Filter) Forget(Key)
+func (f *Filter) Stats() FilterStats
 
 type Writer struct{ /* ... */ }
-func NewWriter(pool *pgxpool.Pool, in <-chan Observation, cfg WriterConfig) *Writer
+func NewWriter(pool *pgxpool.Pool, in <-chan Observation, cfg WriterConfig, log *slog.Logger) *Writer
 // Run blocks until in is closed AND the final batch is flushed, or ctx is done.
 func (w *Writer) Run(ctx context.Context) error
 ```
@@ -1606,7 +1616,7 @@ Do not ask; just do it:
 - Anything blocked on the human gets a row in §16 with the specific question and the default that will be used until answered.
 - New domain terms get a line in §17 the moment they are used anywhere above.
 - Update §13 with a real number as soon as one exists, and delete the "baseline TBD".
-- At the start of a session, read this file and say in one line what state the project is in and what the next unchecked milestone task is.
+- At the start of a session, read this file and say in one line what state the project is in and what the next unchecked milestone task is. `CLAUDE.md` carries this rule and the rest of the every-session checklist; when a rule in §14 changes, change it there too.
 
 ---
 
