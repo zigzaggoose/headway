@@ -5,7 +5,9 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -19,11 +21,18 @@ import (
 	// corrupts every service date. PROJECT.md §9.2.
 	_ "time/tzdata"
 
+	"github.com/zigzaggoose/headway"
 	"github.com/zigzaggoose/headway/internal/config"
 	"github.com/zigzaggoose/headway/internal/feed"
+	"github.com/zigzaggoose/headway/internal/store"
 )
 
 func main() {
+	// Migrations run at startup either way; this flag only stops afterwards,
+	// so `make migrate` and a starting container take the same code path.
+	migrateOnly := flag.Bool("migrate-only", false, "apply database migrations and exit")
+	flag.Parse()
+
 	cfg, err := config.Load()
 	if err != nil {
 		// No logger yet: the configuration is what says how to log. Exit code 2
@@ -42,9 +51,36 @@ func main() {
 		"retention_days", cfg.Maintain.RetentionDays,
 	)
 
+	// An unreachable database at startup is fatal; at runtime it is not
+	// (§10.1). Exit code 2 covers both refusals to start.
+	db, err := store.Open(context.Background(), cfg.DatabaseURL, cfg.DB.MaxConns, log)
+	if err != nil {
+		log.Error("cannot start", "component", "main", "err", err.Error())
+		os.Exit(2)
+	}
+
+	migrations, err := fs.Sub(headway.Migrations, "migrations")
+	if err != nil {
+		log.Error("cannot start", "component", "main", "err", err.Error())
+		os.Exit(2)
+	}
+	applied, err := db.Migrate(context.Background(), migrations)
+	if err != nil {
+		log.Error("cannot start", "component", "main", "err", err.Error())
+		os.Exit(2)
+	}
+	if len(applied) > 0 {
+		log.Info("migrations applied", "component", "main", "count", len(applied), "versions", applied)
+	}
+	if *migrateOnly {
+		log.Info("migrate-only: nothing left to do", "component", "main")
+		db.Close()
+		return
+	}
+
 	// Shutdown is ordered and the order matters (§9.4): cancel the pollers,
 	// then wait for every producer to return, and only then close what they
-	// write into. The later steps arrive with the writer.
+	// write into. The steps between arrive with the writer.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -75,6 +111,7 @@ func main() {
 
 	log.Info("shutdown started", "component", "main")
 	pollers.Wait() // step 3: no new observations can be produced
+	db.Close()     // step 6: after every producer has stopped, never before
 	log.Info("shutdown complete", "component", "main", "requests_today", limiter.Used())
 }
 

@@ -254,6 +254,7 @@ Everything above runs in **one process** (`cmd/headway`). The numbers are packag
 headway/
 ├── PROJECT.md                        This file. Source of truth.
 ├── README.md                         Short: what it is, how to run it, a screenshot.
+├── embed.go                          //go:embed migrations/*.sql. No logic; embed cannot reach out of its own directory.
 ├── go.mod                            Module github.com/<you>/headway, go 1.27.
 ├── go.sum
 ├── Makefile                          run, test, lint, fixtures, migrate, loadtest targets.
@@ -316,7 +317,8 @@ headway/
 │   │   ├── schedule.go               Reads/writes for the static tables.
 │   │   ├── rollup.go                 Rollup and retention SQL.
 │   │   ├── migrate.go                Embedded migration runner. No external tool.
-│   │   └── store_integration_test.go Tagged `//go:build integration`.
+│   │   ├── migrate_test.go           Loader rules, retry policy, secret redaction. No database needed.
+│   │   └── store_integration_test.go Tagged `//go:build integration`. Schema per test.
 │   ├── rollup/
 │   │   ├── job.go                    Ordered maintenance run (9).
 │   │   └── job_test.go
@@ -1425,7 +1427,7 @@ Each stage ends in something that runs and can be demonstrated. **Stage 2 is the
 - [x] Register for a TfNSW Open Data account and obtain an API key.
 - [x] Confirm the Sydney Trains realtime endpoint path with `curl` per §8.1 and record the working URL in `config/feeds.json`. Both paths verified 2026-09-21; the schedule bundle is on v1, not v2.
 - [x] `internal/config`: load and validate every variable in §8; `.env.example` complete.
-- [ ] `internal/store`: pool, embedded migration runner, `migrations/0001` and `0002` applied on start.
+- [x] `internal/store`: pool, embedded migration runner, all four migrations applied on start. Verified against Postgres 18.6: eight integration tests, `make migrate` idempotent.
 - [x] `internal/feed`: one poller, shared limiter, conditional requests where the upstream supports them (schedule only — §9.5 case 9), all the HTTP status cases in §9.5. Verified against the live feed: four polls in 50 s at 15 s + jitter, ordered shutdown, 4 requests spent.
 - [ ] `internal/gtfsrt`: decode to `RawUpdate`. All nil handling here.
 - [ ] `cmd/fixturedump`: capture two consecutive live responses into `testdata/`.
@@ -1654,6 +1656,14 @@ Append-only. To reverse a decision, add a row that names the one it supersedes.
 | 2026-09-21 | A limiter reservation is consumed when granted, even if the context is cancelled before the request goes out. | Returning the token needs a second lock round-trip on a path that only runs during shutdown, and over-counting the quota errs toward fewer upstream requests, which is the safe direction. | Reservation cancellation (`x/time/rate`'s `Reservation.Cancel` shape) for a path that runs once per process exit. |
 | 2026-09-21 | The first poll happens immediately at startup, not after one interval. | A restart should produce data at once, and the change filter is empty after a restart anyway, so that first fetch is the one that repopulates it (§9.3 case 2). | Waiting one interval (a poll interval of silence after every deploy). |
 | 2026-09-21 | `Poller.Run` returns nil on context cancellation, and classifies a fetch error against its own context before blaming the feed. | A clean shutdown is not a failure; the caller knows whether it asked for one. Returning `ctx.Err()` would make every normal shutdown log an error, and counting a cancelled fetch as a timeout would inflate the backoff. | Returning `ctx.Err()`; classifying purely on the error value (cannot tell our cancellation from an upstream stall). |
+| 2026-09-21 | Migrations are embedded through a root `embed.go` in `package headway`, and the runner takes an `fs.FS`. | `//go:embed` cannot reach outside its own directory, and §5 puts `migrations/` at the repository root where a reader looks for them. Taking an `fs.FS` rather than reaching for the global also lets the runner's own failure modes be tested against `fstest.MapFS` with no database at all. | Moving `migrations/` under `internal/store` (hides the schema from anyone browsing the repo); reading migrations from disk at runtime (a bind mount, and Definition of Done #8 says no manual steps). |
+| 2026-09-21 | An applied migration is checksummed, and a changed file fails startup rather than re-running or being ignored. | §14 says never edit an applied migration. Without a checksum that is a convention people break by accident; with one it is a failed startup naming the file and the date it was applied. | Trusting the version number alone (an edited file diverges silently from the schema it produced); re-running changed migrations (destructive and unordered). |
+| 2026-09-21 | A migration numbered below one already applied is rejected. | It would run against a schema its author never saw. This is the failure mode of two branches each adding "the next" migration and both merging. | Applying it anyway in version order (runs late against an unexpected schema); ignoring it (the file exists and does nothing, which is worse). |
+| 2026-09-21 | Each migration runs in its own transaction, and the `schema_migrations` row is written inside it. | Half-applied DDL recorded as applied cannot be recovered without hand-editing the database. One transaction per migration also means a failure stops at a known point rather than rolling back work that succeeded. | One transaction for all migrations (a failure at the end discards a large successful DDL run); recording outside the transaction (the two can disagree). |
+| 2026-09-21 | Migrations take a Postgres advisory lock for the duration of the run. | `make migrate` and a starting container can collide, and concurrent `CREATE TABLE` produces an error at best. This is not the distributed locking §2 rejects — nothing coordinates ingestion, and exactly one instance still writes. | No lock (a race between a deploy and a manual run); a lock table (reinvents an advisory lock, and needs its own migration). |
+| 2026-09-21 | `store.Retry` retries only three SQLSTATEs (40001, 40P01, 53300) plus errors `pgconn.SafeToRetry` accepts, for three attempts after the first. | A constraint violation fails identically on the second attempt, so retrying it spends the backoff for nothing and delays the error the caller needs. `SafeToRetry` is pgx's own answer to whether a statement could already have taken effect, which is the question that matters for a write. | Retrying every error (turns a bug into a slow bug); retrying on error text (breaks on a Postgres upgrade). |
+| 2026-09-21 | A `DATABASE_URL` that pgx rejects produces a fixed error with no detail. | pgx puts the connection string in that error and the connection string carries the password; `config.Load` has already checked that it parses as a postgres URL, so the detail that is dropped is small. | Wrapping pgx's error (leaks the password into any log that catches a startup failure). |
+| 2026-09-21 | Each integration test runs in its own `test_<nanos>_<rand>` schema and drops it afterwards. | Tests can then run in parallel against one database, and a failed test leaves nothing behind for the next one to trip over. | A shared schema with truncation between tests (serialises the suite, and a panic leaves state behind); a database per test (slow to create). |
 
 ---
 
