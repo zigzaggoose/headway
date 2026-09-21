@@ -20,13 +20,23 @@ are in place. No feed is polled yet. `PROJECT.md` §12 tracks the milestones.
 
 ```sh
 cp .env.example .env     # then put a real TFNSW_API_KEY in it
-make up                  # postgres + headway via docker compose
-make test                # unit tests
-make lint                # gofmt + go vet
+
+docker run -d --name headway-dev-pg -p 5432:5432 \
+  -e POSTGRES_USER=headway -e POSTGRES_PASSWORD=headway -e POSTGRES_DB=headway \
+  postgres:18-alpine
+
+make migrate             # apply migrations; the service also does this on start
+make run                 # poll, decode, serve
 ```
 
-`make run` runs the service directly against a local Postgres instead. Every
-configuration variable is documented in `.env.example` and in `PROJECT.md` §8.
+`make test` runs the unit tests; `make test-integration` also runs the ones
+needing a database, and skips them when `DATABASE_URL_TEST` is unset. Both URLs
+in `.env.example` already point at the container above. `make lint` is gofmt
+and go vet.
+
+`make up` will replace the `docker run` line once `deploy/docker-compose.yml`
+exists (Stage 1, §12). Every configuration variable is documented in
+`.env.example` and in `PROJECT.md` §8.
 
 ## Stack
 
