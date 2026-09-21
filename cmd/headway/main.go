@@ -24,6 +24,7 @@ import (
 	"github.com/zigzaggoose/headway"
 	"github.com/zigzaggoose/headway/internal/config"
 	"github.com/zigzaggoose/headway/internal/feed"
+	"github.com/zigzaggoose/headway/internal/gtfsrt"
 	"github.com/zigzaggoose/headway/internal/store"
 )
 
@@ -115,16 +116,28 @@ func main() {
 	log.Info("shutdown complete", "component", "main", "requests_today", limiter.Used())
 }
 
-// decodeAndIngest is where internal/gtfsrt and internal/match will hang. Until
-// they exist the handler records that bytes arrived, at debug: a line per poll
-// is far above the rate §10.2 allows for info.
+// decodeAndIngest decodes on the poller's goroutine (§9.4). internal/match and
+// the ingest pipeline hang off the decoded updates from Stage 2; until then
+// the handler reports what it decoded, at debug, because a line per poll is far
+// above the rate §10.2 allows for info.
 func decodeAndIngest(log *slog.Logger) feed.Handler {
 	return func(_ context.Context, r feed.Response) {
-		log.Debug("feed fetched",
-			"component", "feed",
+		decoded, err := gtfsrt.Decode(r.FeedID, r.Body, r.FetchedAt)
+		if err != nil {
+			// A gateway error page served with a 200 lands here, not in the
+			// poller: the transport succeeded and the payload did not.
+			log.Error("decode failed", "component", "gtfsrt", "feed_id", r.FeedID, "err", err.Error())
+			return
+		}
+		log.Debug("feed decoded",
+			"component", "gtfsrt",
 			"feed_id", r.FeedID,
 			"bytes", len(r.Body),
-			"fetched_at", r.FetchedAt.Format(time.RFC3339),
+			"entities", decoded.Entities,
+			"updates", len(decoded.Updates),
+			"dropped", decoded.TotalDropped(),
+			"feed_age_s", decoded.Age().Seconds(),
+			"header_ts_missing", decoded.HeaderTSMissing,
 		)
 	}
 }

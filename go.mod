@@ -2,7 +2,11 @@ module github.com/zigzaggoose/headway
 
 go 1.27
 
-require github.com/jackc/pgx/v5 v5.11.0
+require (
+	github.com/MobilityData/gtfs-realtime-bindings/golang/gtfs v1.0.0
+	github.com/jackc/pgx/v5 v5.11.0
+	google.golang.org/protobuf v1.36.12
+)
 
 require (
 	github.com/jackc/pgpassfile v1.0.0 // indirect
