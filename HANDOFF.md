@@ -25,22 +25,19 @@ Verified against the live API, not just in tests.
 
 **Not yet connected:** the ingest pipeline. `internal/ingest` is complete and tested,
 but `main` does not use it — the handler in `cmd/headway/main.go` decodes and logs a
-count, and stops there. An `Observation` needs a `ServiceDate`, and deriving one
-needs `internal/servicetime`, which does not exist.
+count, and stops there. `internal/servicetime` now exists (2026-09-23), so an
+`Observation` can get its `ServiceDate`.
 
 ## Do this next
 
-**`internal/servicetime`** — the four functions in §7.3: `ParseGTFSTime`,
-`ServiceDayStart`, `AtServiceOffset`, `CandidateServiceDates`.
+**Wire the pipeline into `main`**: decode → observation → `pipeline.Submit`. The
+service date is `start_date` when the producer sends it, else the first of
+`servicetime.CandidateServiceDates(headerTS, cfg.Service.DayOverlap)`. Without a
+matcher there is no schedule to disambiguate the two candidates, so the first one is
+a known approximation until Stage 2. `servicetime` is done: note that on DST days the
+service day starts at 23:00 or 01:00, not midnight (§15, 2026-09-23).
 
-§12 lists it under Stage 2, but Stage 1 cannot write a single row without it, so it
-comes now. §11.1 says it carries the highest test-to-code ratio in the repo and both
-DST transition dates are hard-coded fixtures; §9.2 lists nine edge cases that each
-need a named subtest. The whole package is pure functions over stdlib `time` — no
-calendar library, no custom date type.
-
-Then wire the pipeline into `main` (decode → observation → `pipeline.Submit`) and
-Stage 1's remaining items: `internal/cache`, `internal/api` (`/v1/lines/{id}/now`,
+Then Stage 1's remaining items: `internal/cache`, `internal/api` (`/v1/lines/{id}/now`,
 `/healthz`, `/readyz`), the full §9.4 shutdown order, `deploy/`, the VM.
 
 ## Completed this session

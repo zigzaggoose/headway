@@ -912,17 +912,19 @@ func ParseGTFSTime(s string) (seconds int, err error)
 
 // ServiceDayStart returns the instant that seconds-since-service-day-start is
 // measured from, which GTFS defines as noon minus twelve hours on the service
-// date. On the October DST transition that is 00:00 local; on the April
-// transition it is also 00:00 local, but the day is 25 hours long. Computing it
-// as "midnight" directly is wrong on transition days.
+// date. On the October DST transition that is 23:00 the previous evening (a
+// 23-hour day); on the April transition it is 01:00 (a 25-hour day). Computing
+// it as "midnight" directly is wrong on transition days.
 func ServiceDayStart(d time.Time) time.Time
 
 // AtServiceOffset converts (service date, seconds) into an absolute instant.
 func AtServiceOffset(serviceDate time.Time, seconds int) time.Time
 
 // CandidateServiceDates returns the service dates a given instant could belong
-// to, newest first. Usually one; two within SERVICE_DAY_OVERLAP_H of midnight.
-func CandidateServiceDates(t time.Time) []time.Time
+// to, newest first. Usually one; two within overlap (SERVICE_DAY_OVERLAP_H) of
+// the owning day's ServiceDayStart. Ownership goes by ServiceDayStart, not the
+// local calendar date.
+func CandidateServiceDates(t time.Time, overlap time.Duration) []time.Time
 ```
 
 ```go
@@ -1189,10 +1191,10 @@ There is a second, related trap: the generated bindings in `github.com/MobilityD
 
 1. `"25:10:00"` parses to `90600`. `"24:00:00"` parses to `86400`. `"07:5:00"` (non-padded) parses; TfNSW feeds have been seen with non-padded hours in other GTFS producers, so tolerate it.
 2. `"-01:00:00"` or a value above `SERVICE_TIME_MAX_S` (default 48 h) is rejected at load with the row number in the error.
-3. The October transition: `AtServiceOffset(2026-10-04, 2*3600)` — 02:00 does not exist locally. `Add` on an absolute instant yields 03:00 AEDT, which is correct and needs no special case. There is a test asserting exactly this.
+3. The October transition: `AtServiceOffset(2026-10-04, 2*3600)`. The service day starts at 23:00 AEST on 10-03 (noon AEDT minus 12 h), so two hours in is 01:00 AEST, before the change; the nonexistent 02:00 is never produced and no special case is needed. There is a test asserting exactly this. (Superseded wording said 03:00 AEDT, which is what a midnight start would give — §15, 2026-09-23.)
 4. The April transition: the service day is 25 hours. `AtServiceOffset(d, 25*3600)` lands on 01:00 the next calendar day, not 02:00. Test it.
 5. The April transition: two distinct UTC instants render as `02:30 local`. Rollup buckets are keyed on `bucket_start timestamptz`, so both survive as separate rows; the API renders the offset (`+11:00` and `+10:00`) so a reader can tell them apart.
-6. An update arriving at 00:30 local for a trip that started at 23:50 the previous service date → `CandidateServiceDates` returns yesterday first when `start_date` is absent.
+6. An update arriving at 00:30 local for a trip that started at 23:50 the previous service date → when `start_date` is absent, `CandidateServiceDates` returns today then yesterday, and today's copy of the trip fails `SERVICE_DATE_TOLERANCE` (it is ~23 h away), so yesterday is chosen.
 7. `TripDescriptor.start_date` disagrees with the schedule (the producer says today, the trip only exists yesterday) → trust `start_date` and record `matched=false` rather than silently reassigning. Counter `headway_service_date_conflict_total`.
 8. Retention and partition creation use service dates in `servicetime.Loc`, not `time.Now().UTC()`. A partition boundary computed in UTC is ten or eleven hours off and will drop a partition that is still being written to.
 9. The transition Sunday needs 25 hours of partition coverage under a single `service_date`; since partitions are keyed on `service_date` (a `date`), not an instant, this is automatically correct. Note it in the test anyway so nobody "fixes" it.
@@ -1472,7 +1474,7 @@ Each stage ends in something that runs and can be demonstrated. **Stage 2 is the
 
 ### Stage 2 — Schedule matching, history, CI (stopping point)
 
-- [ ] `internal/servicetime` with full DST test coverage. Do this before the matcher.
+- [x] `internal/servicetime` with full DST test coverage. Do this before the matcher. Done in Stage 1, since no observation can be stored without a service date: 40 tests and subtests, 96.7 % covered, both transitions as fixtures.
 - [ ] `internal/gtfsstatic`: download, hash, unzip, parse, insert, activate; version retention.
 - [ ] `migrations/0001` static tables populated; `schedule_versions` partial unique index verified by a test that tries to double-activate.
 - [ ] `internal/match`: schedule cache with atomic swap; resolution orders 1–4; delay derivation per §9.4's reconcile rule.
@@ -1708,6 +1710,7 @@ Append-only. To reverse a decision, add a row that names the one it supersedes.
 | 2026-09-21 | `Filter.Forget` does not decrement the admitted counter. | "Admitted" means "passed the change filter", which a dropped observation did; the queue refusing it afterwards is a separate event with its own counter (§10.3 has both). Decrementing would also undercount whenever the entry being forgotten belongs to a later admission than the one that was dropped. | Decrementing (drifts out of line with reality and conflates two metrics). |
 | 2026-09-22 | Deployment target is an Azure B2pts v2 (Ampere arm64, 2 vCPU, 1 GiB) on an Azure for Students subscription, Australia East. Supersedes the Oracle Cloud Always Free target in §3 and the fallback in §16 q6. | Oracle Always Free capacity was never available to this account. B2pts v2 is arm64, so nothing about the build, the runtime image or `make cross` changes, and it is free-tier eligible for 12 months. | Google Cloud e2-micro and Azure B1s (both x86 — would have forced `GOARCH=amd64` and contradicted the runtime-image row above); Hetzner CAX11 (arm64, 4 GiB, ~€3.79/mo — more RAM and no expiry, but not free and not already paid for). |
 | 2026-09-23 | Deployment target is a BinaryLane Standard 1 GB VM in Sydney, x86-64, AUD 4.90/month ex GST. Supersedes the 2026-09-22 Azure row and, for architecture only, the 2026-09-21 runtime-image row: builds now target `linux/amd64`. §13's database-size target drops from 20 GB to 10 GB to fit a 20 GB disk alongside the OS and images. | Oracle Always Free rejected the signup (debit card, no credit card available). Azure for Students is disabled, not billed, when its credit runs out, which silently stops a capture meant to run indefinitely. A paid VM around AUD 5/month was acceptable. BinaryLane is the cheapest option checked on 2026-09-23 and needs no signup approval. Switching to amd64 costs only the `make cross` target now, because `deploy/` does not exist yet. The measured ~270 MB/day puts 7 days of one feed at ~1.9 GB. | Oracle PAYG (card rejected); Azure for Students (expiry cliff); Hetzner CAX11 (arm64, 4 GB, but €5.99/month after the June 2026 increase, ~AUD 11, and in Europe); Hetzner CX23 (€5.49 + IPv4, Europe); BinaryLane 2 GB (AUD 9.80, needed only for more than one feed). |
+| 2026-09-23 | `ServiceDayStart` is noon minus twelve hours as GTFS specifies, which on the October transition is 23:00 the previous evening and on the April transition 01:00. §7.3's comment and §9.2 case 3 had assumed local midnight on the October day and are corrected. `CandidateServiceDates` takes the overlap as a parameter and decides ownership by `ServiceDayStart`, not the calendar date. | The rule was already chosen in §9.2; the examples contradicted it. With a midnight-based owner, 23:00–24:00 before the October change and 00:00–01:00 on the April change are attributed to the wrong service date. The overlap is a parameter because components never read config (§8). | Local midnight as the reference (contradicts GTFS and the chosen approach); calendar-date ownership (wrong for two hours a year); reading `SERVICE_DAY_OVERLAP_H` from a package variable. |
 
 ---
 
