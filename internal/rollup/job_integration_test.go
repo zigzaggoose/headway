@@ -305,7 +305,7 @@ func TestDropPartitionsBefore_KeepsAnythingNotYetRolledUp(t *testing.T) {
 	if n := h.count(t, `SELECT count(*) FROM observations WHERE service_date = $1`, date(11)); n != 1 {
 		t.Errorf("the 11th's row is gone: %d left", n)
 	}
-	if n := h.count(t, `SELECT count(*) FROM pg_class WHERE relname = 'observations_2026_09_13'`); n != 1 {
+	if n := h.count(t, `SELECT count(*) FROM pg_inherits WHERE inhparent = 'observations'::regclass AND inhrelid::regclass::text = 'observations_2026_09_13'`); n != 1 {
 		t.Error("the cutoff date itself was dropped")
 	}
 }
@@ -320,7 +320,7 @@ func TestTick_RunsEveryStepAndExpiresTheFilter(t *testing.T) {
 		t.Fatalf("tick: %v", err)
 	}
 
-	if n := h.count(t, `SELECT count(*) FROM pg_class WHERE relkind = 'r' AND relname LIKE 'observations_2026_09_%'`); n != 5 {
+	if n := h.count(t, `SELECT count(*) FROM pg_inherits WHERE inhparent = 'observations'::regclass AND inhrelid::regclass::text LIKE 'observations_2026_09_%'`); n != 5 {
 		t.Errorf("%d daily partitions, want yesterday through three days ahead", n)
 	}
 	if n := h.count(t, `SELECT count(*) FROM otp_stop_hourly`); n != 1 {
