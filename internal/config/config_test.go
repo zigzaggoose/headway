@@ -194,6 +194,16 @@ func TestLoad_ValidatedRange_RejectsItsBoundary(t *testing.T) {
 			accepted: map[string]string{"ON_TIME_LATE_S": "899", "ON_TIME_VERY_LATE_S": "900"},
 		},
 		{
+			name:     "pprof on a public address",
+			env:      map[string]string{"PPROF_ADDR": "0.0.0.0:6060"},
+			accepted: map[string]string{"PPROF_ADDR": "127.0.0.1:6060"},
+		},
+		{
+			name:     "pprof on an address with no port",
+			env:      map[string]string{"PPROF_ADDR": "localhost"},
+			accepted: map[string]string{"PPROF_ADDR": "localhost:6060"},
+		},
+		{
 			name:     "a rate limit of zero admits no request",
 			env:      map[string]string{"FEED_RATE_LIMIT_RPS": "0"},
 			accepted: map[string]string{"FEED_RATE_LIMIT_RPS": "0.5"},

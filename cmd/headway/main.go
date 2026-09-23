@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/http/pprof"
 	"os"
 	"os/signal"
 	"sync"
@@ -163,6 +164,7 @@ func main() {
 			Schedules:       matcher.Schedules,
 			History:         db.History,
 			HistoryMaxDays:  cfg.HTTP.HistoryMaxDays,
+			RateLimit:       cfg.HTTP.RateLimit,
 			PipelineStats:   pipeline.Stats,
 			MatchCounts:     matcher.LastCounts,
 			RequestsToday:   limiter.Used,
@@ -185,6 +187,26 @@ func main() {
 		}
 	}()
 	log.Info("http listening", "component", "main", "addr", ln.Addr().String())
+
+	// Profiling, opt-in and loopback-only (config enforces it): a second
+	// server so its routes can never be reached through the API's address.
+	var profiler *http.Server
+	if cfg.HTTP.PprofAddr != "" {
+		mux := http.NewServeMux()
+		mux.HandleFunc("/debug/pprof/", pprof.Index)
+		mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
+		mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
+		mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
+		mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
+		profiler = &http.Server{Addr: cfg.HTTP.PprofAddr, Handler: mux, ReadHeaderTimeout: cfg.HTTP.ReadTimeout}
+		go func() {
+			if err := profiler.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
+				// Losing the profiler is no reason to stop ingesting.
+				log.Error("pprof server stopped", "component", "main", "err", err.Error())
+			}
+		}()
+		log.Warn("pprof listening", "component", "main", "addr", cfg.HTTP.PprofAddr)
+	}
 
 	// The schedule gets its own client because its timeout is the schedule's
 	// (§10.1), not a realtime poll's: the bundle is 11 MB. It shares the
@@ -248,6 +270,9 @@ func main() {
 	drainCtx, cancelDrain := context.WithTimeout(context.Background(), cfg.HTTP.ShutdownGrace)
 	if err := srv.Shutdown(drainCtx); err != nil {
 		log.Error("http did not drain", "component", "main", "err", err.Error())
+	}
+	if profiler != nil {
+		_ = profiler.Close() // a profile in progress is not worth waiting for
 	}
 	cancelDrain()
 	pollers.Wait()    // step 3: no new observations can be produced

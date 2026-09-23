@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/url"
 	"os"
 	"time"
@@ -118,6 +119,7 @@ type HTTPConfig struct {
 	HistoryMaxDays  int           // HISTORY_MAX_DAYS
 	CacheTTL        time.Duration // CACHE_TTL
 	ReadyMaxFeedAge time.Duration // READY_MAX_FEED_AGE
+	PprofAddr       string        // PPROF_ADDR; empty means off
 }
 
 // DBConfig governs the pgx pool.
@@ -191,6 +193,7 @@ func load(lookup func(string) (string, bool)) (*Config, error) {
 			HistoryMaxDays:  l.int("HISTORY_MAX_DAYS", 90),
 			CacheTTL:        l.dur("CACHE_TTL", 45*time.Minute),
 			ReadyMaxFeedAge: l.dur("READY_MAX_FEED_AGE", 120*time.Second),
+			PprofAddr:       l.str("PPROF_ADDR", ""),
 		},
 		DB: DBConfig{
 			MaxConns: l.int("DB_MAX_CONNS", 10),
@@ -357,6 +360,15 @@ func (c *Config) validate() []error {
 	// Readiness would flap if a single missed poll could expire it.
 	if c.HTTP.ReadyMaxFeedAge <= c.Poll.Interval {
 		bad("READY_MAX_FEED_AGE (%s) must exceed FEED_POLL_INTERVAL (%s)", c.HTTP.ReadyMaxFeedAge, c.Poll.Interval)
+	}
+
+	// pprof exposes goroutine stacks and heap contents; it must never listen
+	// where anyone but the operator on the machine can reach it.
+	if a := c.HTTP.PprofAddr; a != "" {
+		host, _, err := net.SplitHostPort(a)
+		if ip := net.ParseIP(host); err != nil || (host != "localhost" && (ip == nil || !ip.IsLoopback())) {
+			bad("PPROF_ADDR is %q, want a loopback host:port such as 127.0.0.1:6060", a)
+		}
 	}
 
 	// The writer holds one connection; anything less leaves the API none.

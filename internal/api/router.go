@@ -19,22 +19,23 @@ import (
 // Options is everything the handlers read. Ping is a function rather than
 // the store so tests can make the database fail without one.
 type Options struct {
-	Cache          *cache.Cache
-	Ping           func(context.Context) error
-	ScheduleLoaded func() bool // true once any feed's timetable is in the matcher
-	Schedules      func() []*match.Schedule
-	History        func(context.Context, store.HistoryQuery) (store.History, error)
-	HistoryMaxDays int
-
-	// Admin stats sources. Each is a snapshot safe to take from any goroutine.
-	PipelineStats   func() ingest.Stats
-	MatchCounts     func() map[string]match.Counts
-	RequestsToday   func() int
-	Maintenance     func(context.Context) (store.Maintenance, error)
+	Cache           *cache.Cache
+	Ping            func(context.Context) error
+	ScheduleLoaded  func() bool // true once any feed's timetable is in the matcher
+	Schedules       func() []*match.Schedule
+	History         func(context.Context, store.HistoryQuery) (store.History, error)
+	HistoryMaxDays  int
+	RateLimit       float64 // HTTP_RATE_LIMIT_RPS per client IP; 0 disables it
 	OnTime          config.Thresholds
 	ReadyMaxFeedAge time.Duration
 	Now             func() time.Time
 	Log             *slog.Logger
+
+	// Admin stats sources. Each is a snapshot safe to take from any goroutine.
+	PipelineStats func() ingest.Stats
+	MatchCounts   func() map[string]match.Counts
+	RequestsToday func() int
+	Maintenance   func(context.Context) (store.Maintenance, error)
 }
 
 type server struct{ Options }
@@ -57,5 +58,7 @@ func NewHandler(o Options) http.Handler {
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusNotFound, "not_found", "no endpoint at "+r.URL.Path)
 	})
-	return s.middleware(mux)
+	// The limit runs inside the middleware, so a 429 still gets a request id
+	// and an access log line.
+	return s.middleware(s.limit(mux))
 }
