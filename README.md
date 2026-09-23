@@ -13,8 +13,10 @@ and the realtime feed is not archived anywhere queryable. Headway captures it.
 
 ## Status
 
-Stage 1 in progress: the skeleton, the module, the migrations and the Makefile
-are in place. No feed is polled yet. `PROJECT.md` §12 tracks the milestones.
+Stage 1 code complete: it polls the Sydney Trains feed every 15 s, stores
+unmatched delay observations, and serves `/v1/lines/{id}/now`, `/healthz` and
+`/readyz`. Not yet deployed; timetable matching is Stage 2. `PROJECT.md` §12
+tracks the milestones.
 
 ## Running it
 
@@ -34,9 +36,17 @@ needing a database, and skips them when `DATABASE_URL_TEST` is unset. Both URLs
 in `.env.example` already point at the container above. `make lint` is gofmt
 and go vet.
 
-`make up` will replace the `docker run` line once `deploy/docker-compose.yml`
-exists (Stage 1, §12). Every configuration variable is documented in
-`.env.example` and in `PROJECT.md` §8.
+To run the whole thing as it is deployed — Postgres and the service in Compose,
+built from `deploy/Dockerfile` — set `POSTGRES_PASSWORD` in `.env` and:
+
+```sh
+make up                  # build, start, migrate; the API is on :8080
+curl localhost:8080/readyz
+make down                # the database volume survives
+```
+
+Every configuration variable is documented in `.env.example` and in
+`PROJECT.md` §8.
 
 ## Stack
 

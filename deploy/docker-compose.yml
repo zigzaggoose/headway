@@ -1,0 +1,64 @@
+# Production and local: postgres + headway. Run from the repository root with
+#   docker compose --env-file .env -f deploy/docker-compose.yml up -d
+# (make up adds the local override). On the VM the repository is cloned to
+# /opt/headway, so ../.env below is /opt/headway/.env (§8.2).
+
+name: headway
+
+x-logging: &logging
+  # The VM has a 20 GB disk. Unrotated container logs are the easiest way to
+  # fill it without the database noticing.
+  driver: json-file
+  options:
+    max-size: 10m
+    max-file: "3"
+
+services:
+  postgres:
+    # 18.6. The digest pins the exact image; bump both together.
+    image: postgres:18-alpine@sha256:77f585114c32fbca283dc835b0596f4e52b51b4c6662d7810b2f4084f60a1873
+    environment:
+      POSTGRES_USER: headway
+      POSTGRES_DB: headway
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    # 128MB fits beside the service on the 1 GB VM (§16 q6).
+    command: ["postgres", "-c", "shared_buffers=128MB"]
+    volumes:
+      # From 18 the image keeps its data under a versioned subdirectory of
+      # /var/lib/postgresql, and expects the volume mounted there.
+      - pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "headway", "-d", "headway"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+    logging: *logging
+
+  headway:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    image: headway:local
+    env_file: ../.env
+    environment:
+      # Overrides the laptop's localhost URL from .env: inside Compose the
+      # database is the postgres service.
+      DATABASE_URL: postgres://headway:${POSTGRES_PASSWORD}@postgres:5432/headway?sslmode=disable
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+    # Shutdown drains HTTP for up to HTTP_SHUTDOWN_GRACE and then the writer
+    # for up to the same again (§9.4). Docker's default of 10s would SIGKILL
+    # mid-flush and lose the final batch.
+    stop_grace_period: 45s
+    restart: unless-stopped
+    logging: *logging
+    # No healthcheck: the image has no shell or HTTP client to run one, and
+    # Compose does not restart an unhealthy container anyway. /healthz is for
+    # whatever watches from outside.
+
+volumes:
+  pgdata:

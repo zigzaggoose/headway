@@ -1,0 +1,9 @@
+# Local only. make up layers this over docker-compose.yml.
+services:
+  postgres:
+    # 5433, not 5432: the dev database from README.md already has 5432.
+    ports:
+      - "5433:5432"
+  headway:
+    environment:
+      LOG_FORMAT: text

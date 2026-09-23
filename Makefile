@@ -5,7 +5,7 @@ GO      ?= go
 # Load .env for the targets that need credentials, so a laptop run matches what
 # Compose gives the container without a dotenv dependency in the binary.
 LOADENV  = if [ -f .env ]; then set -a; . ./.env; set +a; fi;
-COMPOSE ?= docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.override.yml
+COMPOSE ?= docker compose --env-file .env -f deploy/docker-compose.yml -f deploy/docker-compose.override.yml
 
 .PHONY: help run build migrate test test-integration cover lint fmt vet cross fixtures loadtest up down logs tidy clean
 

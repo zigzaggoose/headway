@@ -360,7 +360,7 @@ headway/
 │   └── gtfs_mini.zip                       10 trips, 40 stop_times, 2 routes, hand-built.
 │
 ├── deploy/
-│   ├── Dockerfile                    Multi-stage, CGO_ENABLED=0, GOARCH=amd64, distroless.
+│   ├── Dockerfile                    Multi-stage, CGO_ENABLED=0, cross-compiled to TARGETARCH (amd64 on the VM), distroless.
 │   ├── docker-compose.yml            postgres + headway. Volumes, healthchecks, restart policy.
 │   ├── docker-compose.override.yml   Local only: port mapping, hot env.
 │   └── vm-bootstrap.md               Exact commands run on a fresh BinaryLane VM. Keep current.
@@ -1475,7 +1475,7 @@ Each stage ends in something that runs and can be demonstrated. **Stage 2 is the
 - [x] `internal/cache`: latest-state cache. Per-feed snapshots swapped under an `RWMutex`, 100 % covered, race test verified to fail without the lock.
 - [x] `internal/api`: `/v1/lines/{id}/now` (unmatched-only fields), `/healthz`, `/readyz`. 98.5 % covered; verified live against a real route (18 active trips, feed age 7 s).
 - [x] Ordered graceful shutdown per §9.4. All six steps in `main`; a live SIGINT drained HTTP, flushed the writer and exited 0 with 0 rows lost.
-- [ ] `deploy/Dockerfile` (amd64, distroless) and `deploy/docker-compose.yml`.
+- [x] `deploy/Dockerfile` (amd64, distroless) and `deploy/docker-compose.yml`. 23.9 MB image; `make up` from an empty volume migrates and reports ready; `docker compose stop` drains and exits 0; a `linux/amd64` build verified from the arm64 laptop.
 - [ ] BinaryLane VM provisioned; `deploy/vm-bootstrap.md` written while doing it, not after.
 - [ ] Deployed and reachable. Screenshot of a live `/v1/lines/{id}/now` response in the README.
 - **Demo:** "this URL shows what the T1 is doing right now, and it has been running since Tuesday."
@@ -1723,6 +1723,7 @@ Append-only. To reverse a decision, add a row that names the one it supersedes.
 | 2026-09-23 | The latest-state cache replaces a feed's whole snapshot on every poll and applies `CACHE_TTL` to the feed, on read, instead of expiring entries individually with a sweep goroutine. A trip's next stop is its first stop-time update in feed order. | A trip missing from the latest poll has finished or been withdrawn; per-entry expiry would keep showing it for up to `CACHE_TTL`. Whole-snapshot replacement needs no goroutine and no per-trip bookkeeping, and readers take the lock only to copy map pointers. The feed never sends `stop_sequence`, so feed order is the only unmatched signal for which stop is next. | Per-trip TTL plus a one-minute sweep (§4.2 as first written: stale trips, one more goroutine); merging each poll into the previous state (same staleness). |
 | 2026-09-23 | Four additions to §7, approved by the user: a `not_found` error code for unknown paths; `summary.early`; a 1000 cap on `/now` `limit`; `reasons` beside the envelope on a `/readyz` 503. | §7.2 requires the envelope on every non-2xx and no existing code fit an unknown path. Without `early` the status buckets would not sum to `active_trips`. `limit` needs a range to be "out of range"; 1000 matches `/v1/lines`. The readiness reasons need a home that keeps the envelope's shape. | Letting the mux answer 404/405 in plain text; folding early trips into `on_time`; an unbounded limit. |
 | 2026-09-23 | Stage 1 API semantics without a schedule: a route is known iff it is in a fresh feed snapshot; readiness checks the database and feed freshness only; feed freshness for readiness is the newest snapshot in the latest-state cache rather than poller state. No per-request timeout or per-IP limiter yet. | Nothing else can answer "does this route exist" until the schedule loader; readiness from the cache needs no new shared state in the pollers. `/now` reads memory, so a handler timeout guards nothing until the history endpoints query Postgres. | A 200 with empty trips for any unknown id (hides typos); exporting poller stats for readiness (more cross-goroutine state for the same answer). Per-IP limiting and `http.TimeoutHandler` land with the history endpoints in Stage 2. |
+| 2026-09-23 | Compose layout: the service reads `../.env` (so `/opt/headway/.env` when the repository is cloned to `/opt/headway`), and Compose overrides its `DATABASE_URL` with one built from a new `POSTGRES_PASSWORD` variable. The service has no container healthcheck; Postgres does. `stop_grace_period: 45s`; container logs rotate at 3 × 10 MB. The Dockerfile cross-compiles on `$BUILDPLATFORM` to `$TARGETARCH`. | One `.env` serves `make run` (localhost URL) and Compose (service-name URL) without two copies of the password. Distroless has no shell or HTTP client to run a healthcheck, and Compose does not restart unhealthy containers, so it would only decorate `ps`. Shutdown can take two `HTTP_SHUTDOWN_GRACE` periods and Docker's 10 s default would SIGKILL mid-flush. A 20 GB disk cannot afford unrotated logs. Cross-compiling avoids emulating the Go toolchain on an arm64 laptop. | A `-healthcheck` subcommand in the binary (code for a check nothing acts on); a hard-coded Compose password (the repository is public); a separate `.env.compose`; building under QEMU. |
 
 ---
 

@@ -1,7 +1,8 @@
 # HANDOFF.md
 
-Session state as of **2026-09-21**, commit `78f239a`. Delete or rewrite this file
-when it stops being true. Permanent rules live in `CLAUDE.md`; design lives in
+Session state as of **2026-09-23**; the "Completed this session" and "Decisions"
+sections below are from 2026-09-21. Delete or rewrite this file when it stops
+being true. Permanent rules live in `CLAUDE.md`; design lives in
 `PROJECT.md`.
 
 ## Run these first
@@ -17,7 +18,8 @@ set — it is in `.env`, which `make` sources but a bare `go test` does not.
 
 ## Where we are
 
-**Stage 1 (MVP), 9 of 15 items done.** Nothing is deployed. No HTTP server exists yet.
+**Stage 1 (MVP), 13 of 15 items done** — every code item. The two left are the VM
+and the deployed demo, deferred by the user. Stage 2 has `servicetime` done.
 
 Working end to end today (2026-09-23): the service starts, applies migrations, polls
 the live TfNSW feed every 15 s, decodes ~3,250 updates per poll, converts them with
@@ -32,22 +34,17 @@ clamps early running to zero, because that would bias every on-time percentage.
 
 ## Do this next
 
-**`deploy/`** — `Dockerfile` (multi-stage, `CGO_ENABLED=0`, `GOARCH=amd64`, distroless
-nonroot) and `docker-compose.yml` (postgres + headway, volume, healthchecks, restart
-policy). The last Stage 1 code item; everything else in Stage 1 needs the VM.
+**Stage 2, starting with `internal/gtfsstatic`**: download the `sydneytrains` schedule
+bundle, hash, unzip, parse, insert, activate (§9.1, §12 Stage 2). First thing to check
+once it loads: **whether the bundle contains the feed's operational route ids**
+(`RTTA`, `NSN_1a`, `IWL`…). If it does not, the match-rate target cannot be met and
+§9.1 needs a mapping before the matcher is worth writing.
 
-**Set `stop_grace_period` in Compose to at least 45s.** Shutdown spends up to
-`HTTP_SHUTDOWN_GRACE` (20 s) draining HTTP and up to another 20 s draining the writer.
-Docker's default is 10 s, after which it sends SIGKILL and the final batch is lost.
-
-The API is done (2026-09-23): `/healthz`, `/readyz`, `/v1/lines/{id}/now`, and the
-full §9.4 shutdown order. Four §7 additions were approved by the user and are in
-§15. Until Stage 2, a route with nothing running is a 404 — there is no schedule to
-say it exists.
-
-The BinaryLane VM is deferred by the user's choice (2026-09-23) — not paying yet.
-Rows are being written locally, but nothing captures while the laptop is off, and
-that history is not recoverable. Raise it again when `deploy/` is ready.
+Stage 1 is code-complete (2026-09-23). The two unticked items are the VM and the
+deployed demo, **deferred by the user's choice — not paying yet**. Rows are written
+only while the laptop runs, and history missed is not recoverable; raise it again
+when Stage 2 has something worth showing. `deploy/` is ready: clone to
+`/opt/headway`, put `.env` there with `POSTGRES_PASSWORD`, `make up`.
 
 ## Completed this session
 
