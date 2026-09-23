@@ -281,6 +281,7 @@ func TestConfig_Printed_DoesNotRevealSecrets(t *testing.T) {
 	rendered := []string{
 		fmt.Sprintf("%v", cfg),
 		fmt.Sprintf("%+v", cfg),
+		//lint:ignore S1025 the %s verb is the path under test, not a style choice
 		fmt.Sprintf("%s", cfg.APIKey),
 		fmt.Sprintf("%q", cfg.DatabaseURL),
 		fmt.Sprint(*cfg),

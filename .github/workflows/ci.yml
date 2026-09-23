@@ -1,0 +1,78 @@
+# PROJECT.md §11.3. Every step also runs on a laptop through the Makefile, so
+# a failure here should never be the first time anyone sees it.
+name: ci
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    # A real Postgres, not a mock: the integration tests exist to exercise
+    # partitioning, ON CONFLICT and the DDL (§11.2). Each test works in its
+    # own schema. The password guards a throwaway container and nothing else.
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: headway
+          POSTGRES_PASSWORD: headway
+          POSTGRES_DB: headway
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U headway -d headway"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+
+    env:
+      DATABASE_URL_TEST: postgres://headway:headway@localhost:5432/headway?sslmode=disable
+      STATICCHECK: honnef.co/go/tools/cmd/staticcheck@v0.8.1
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Build
+        run: go build ./...
+
+      - name: Vet
+        run: go vet ./... && go vet -tags=integration ./...
+
+      - name: gofmt
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "gofmt needed:"; echo "$unformatted"; exit 1
+          fi
+
+      - name: staticcheck
+        run: go run "$STATICCHECK" ./... && go run "$STATICCHECK" -tags=integration ./...
+
+      - name: Unit tests
+        run: go test -race -count=1 ./...
+
+      - name: Integration tests
+        run: go test -race -tags=integration -count=1 ./...
+
+      # No gate in v1: a threshold on a project this size rewards testing the
+      # wrong things (§11.3). The number is printed so it is seen.
+      - name: Coverage
+        run: |
+          go test -coverprofile=coverage.out ./...
+          go tool cover -func=coverage.out | tail -1
+
+      # The single most likely deployment failure: the VM is x86-64 and the
+      # laptops are arm64.
+      - name: Cross-compile for the VM
+        run: GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o /dev/null ./cmd/headway

@@ -65,7 +65,7 @@ is missing.
 | `make migrate` | Apply migrations and exit. Startup migrates too. |
 | `make test` | Unit tests, `-race`, no cache. |
 | `make test-integration` | Adds the `//go:build integration` tests. Needs a database; skips without `DATABASE_URL_TEST`. |
-| `make lint` | `go vet` + `gofmt -l`. Both must be clean. |
+| `make lint` | `go vet` + `gofmt -l` + staticcheck (pinned, via `go run`). All must be clean. CI runs the same. |
 | `make cross` | `GOOS=linux GOARCH=amd64` build. Catches the most likely deployment failure. |
 | `make fixtures` | Record live feed fixtures. Consumes API quota — by hand only. |
 

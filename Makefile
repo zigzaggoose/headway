@@ -31,8 +31,14 @@ cover: ## Print total coverage. No gate in v1 (§11.3).
 	$(GO) test -coverprofile=coverage.out ./...
 	$(GO) tool cover -func=coverage.out | tail -1
 
-lint: vet ## gofmt and go vet. staticcheck joins at Stage 2.
+# Run through go run at a pinned version, so it is a tool and not a
+# dependency in go.mod (§3.1). CI runs the same version.
+STATICCHECK = honnef.co/go/tools/cmd/staticcheck@v0.8.1
+
+lint: vet ## gofmt, go vet and staticcheck, as CI runs them.
 	@test -z "$$(gofmt -l .)" || { echo "gofmt needed:"; gofmt -l .; exit 1; }
+	$(GO) run $(STATICCHECK) ./...
+	$(GO) run $(STATICCHECK) -tags=integration ./...
 
 fmt: ## Rewrite files with gofmt.
 	gofmt -w .
