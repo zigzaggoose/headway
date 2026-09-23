@@ -266,11 +266,7 @@ headway/
 │
 ├── cmd/
 │   ├── headway/
-│   │   └── main.go                   Wires config → components → signal handling. No logic.
-│   ├── scheduleload/
-│   │   └── main.go                   One-shot static GTFS load. Useful in dev and in a cron.
-│   ├── maintain/
-│   │   └── main.go                   One-shot rollup + retention. Same code as the in-process job.
+│   │   └── main.go                   Wires config → components → signal handling. No logic. `-migrate-only` and `-maintain-once` are its one-shot modes.
 │   └── fixturedump/
 │       └── main.go                   Fetch one live feed, write it to testdata/ as .pb. See §11.
 │
@@ -1428,7 +1424,7 @@ One alert is required by the Definition of Done; these are the candidates, in pr
 | `HeadwayMatchRateLow` | `headway_match_rate < 0.8` for 30 m | warn | The schedule is probably stale or the bundle changed shape. Check `schedule_versions.loaded_at`. |
 | `HeadwayFreshnessDegraded` | `histogram_quantile(0.95, headway_freshness_lag_seconds) > 60` for 15 m | warn | Writer is behind. Check `headway_queue_length` and disk IOPS. |
 | `HeadwayDefaultPartitionUsed` | `headway_default_partition_rows > 0` | page | `EnsurePartitions` is not running. Fix before retention runs. |
-| `HeadwayDiskLow` | node disk free < 15 % | page | Reduce `RETENTION_DAYS` and run `cmd/maintain`. |
+| `HeadwayDiskLow` | node disk free < 15 % | page | Reduce `RETENTION_DAYS` and run `headway -maintain-once` (`make maintain`; on the VM `docker compose run --rm headway -maintain-once`). |
 
 ---
 
@@ -1521,8 +1517,8 @@ Each stage ends in something that runs and can be demonstrated. **Stage 2 is the
 - [x] Quota budget table in `docs/` showing requests/day against `FEED_DAILY_BUDGET` for the enabled set. `docs/quota.md`: 28,805 a day normally, 29,280 worst case, 52–53 % of budget.
 - [x] Per-feed schedule versions (the loader already supports it; confirm multi-feed activation is independent). `TestLoad_SeveralFeeds_ActivateIndependently`; five versions active side by side live.
 - [ ] Bounded worker pool between decode and match, sized by `INGEST_WORKERS`, **only if** profiling shows the poller goroutine is the bottleneck. If it is not, write down that it is not and skip it.
-- [ ] Daily partition creation and retention running on the maintenance tick; `observations_default` verified empty.
-- [ ] `cmd/maintain` as a standalone entry point for manual runs.
+- [x] Daily partition creation and retention running on the maintenance tick; `observations_default` verified empty. `default_partition_rows: 0` in `/v1/admin/stats` on the dev database and on a fresh Compose stack, 2026-09-23. A live drop has not happened yet — no partition is older than `RETENTION_DAYS` — so the drop itself is proven by the integration tests only.
+- [x] `cmd/maintain` as a standalone entry point for manual runs. Built as `headway -maintain-once` (`make maintain`) rather than a second binary, for the reason `-migrate-only` is a flag: the distroless image carries one binary (§15).
 - [ ] Storage measured before and after rollups; `docs/storage.md` written with real numbers.
 - [ ] Load test with k6 or hey at 50 RPS against `/now` and `/history`; `docs/loadtest.md` with p50/p95/p99.
 - [ ] Profile under load (`pprof` behind `HTTP_ADDR` on a separate, non-public port) and record one thing that was fixed as a result.
@@ -1757,6 +1753,7 @@ Append-only. To reverse a decision, add a row that names the one it supersedes.
 | 2026-09-23 | A 503 does not emit §10.2's extra `error` log line; other 5xx still do. `/v1/lines` sorts routes without a short name last. | 503 is `not_ready`, the expected answer to every readiness probe while the timetable loads; a fresh start logged a dozen ERROR lines in 25 s, which would bury a real one. TfNSW's empty-train `RTTA_*` routes have no short name and sorted to the top. | Logging 503s at `warn` (still noise at the rate probes run). |
 | 2026-09-23 | Rollups bucket a matched visit by its scheduled time (`observations.scheduled_at`, migrations/0006, set by the matcher) and roll each hour up once, three hours after it ends; unmatched visits keep `feed_ts`. Answers §16 q12, as the user chose. Also: the stored timetable is published to the matcher before the pollers start. | TfNSW keeps cancelled and replacement trips in the feed for hours, so the last observation's hour put a morning's cancellations in the evening. With scheduled-hour buckets, a late final word lands after its hour; rolling each hour up once after a settle period keeps the rollup single-pass and never double-counts, at the cost of ignoring words more than three hours late. Publishing first: a restart's first poll was matched against nothing and written twice (2,275 redundant rows on one restart); now 19 of 2,552 first-poll rows are unmatched, all unknown or ADDED trips. | Recomputing recent buckets every tick (scans two or three days of raw rows every 15 minutes on a 1-vCPU VM); a join to `stop_times` at rollup time (the version that matched may have been pruned); bucketing by predicted time (moves as the delay changes, so a visit could be counted in two hours). |
 | 2026-09-23 | Stage 3 enables five feeds and leaves buses in the catalogue disabled, as the user chose. Metro uses the v2 realtime and schedule endpoints. | Buses would add ~330 MB of timetable in memory and ~2.3 GB of raw rows a day (20,576 updates per poll at 23:23 against 2,419 for trains), which the 1 GB / 20 GB VM cannot hold; quota would have been fine. Metro's v1 bundle was last modified in September 2024. | Buses on a 2 GB / 40 GB plan (~AUD 10.78/month); squeezing buses onto 1 GB by filtering the timetable to two days and cutting retention to three. |
+| 2026-09-23 | Manual maintenance is `headway -maintain-once` (and `make maintain`), not `cmd/maintain`. `cmd/scheduleload` is not built: the service loads schedules on start and a restart does the same job. | Same reasoning as the 2026-09-21 row for `-migrate-only`: the distroless image carries exactly one binary, and a second entry point would need a second image or a shell to reach it. | A `cmd/maintain` binary (not in the image, so not runnable on the VM without rebuilding); a maintenance HTTP endpoint (the API never writes, §4.2). |
 
 ---
 

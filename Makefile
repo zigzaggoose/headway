@@ -7,7 +7,7 @@ GO      ?= go
 LOADENV  = if [ -f .env ]; then set -a; . ./.env; set +a; fi;
 COMPOSE ?= docker compose --env-file .env -f deploy/docker-compose.yml -f deploy/docker-compose.override.yml
 
-.PHONY: help run build migrate test test-integration cover lint fmt vet cross fixtures loadtest up down logs tidy clean
+.PHONY: help run build migrate maintain test test-integration cover lint fmt vet cross fixtures loadtest up down logs tidy clean
 
 help:
 	@grep -hE '^[a-z-]+:.*?##' $(MAKEFILE_LIST) | awk -F':.*?## ' '{printf "  %-18s %s\n", $$1, $$2}'
@@ -20,6 +20,9 @@ build: ## Build for this machine.
 
 migrate: ## Apply migrations and exit. The service also migrates on startup.
 	@$(LOADENV) $(GO) run ./cmd/headway -migrate-only
+
+maintain: ## One maintenance tick (partitions, rollup, retention), then exit.
+	@$(LOADENV) $(GO) run ./cmd/headway -maintain-once
 
 test: ## Unit tests, race detector on, no cache.
 	$(GO) test -race -count=1 ./...

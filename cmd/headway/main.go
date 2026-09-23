@@ -41,6 +41,11 @@ func main() {
 	// Migrations run at startup either way; this flag only stops afterwards,
 	// so `make migrate` and a starting container take the same code path.
 	migrateOnly := flag.Bool("migrate-only", false, "apply database migrations and exit")
+	// One maintenance tick — partitions, rollup, retention — then exit. For
+	// the disk-full runbook (§10.3): RETENTION_DAYS=3 headway -maintain-once.
+	// A flag rather than cmd/maintain for the reason -migrate-only is one: the
+	// distroless image carries exactly one binary.
+	maintainOnce := flag.Bool("maintain-once", false, "run one maintenance tick and exit")
 	flag.Parse()
 
 	cfg, err := config.Load()
@@ -85,6 +90,24 @@ func main() {
 	if *migrateOnly {
 		log.Info("migrate-only: nothing left to do", "component", "main")
 		db.Close()
+		return
+	}
+	if *maintainOnce {
+		job := rollup.New(db.Pool(), rollup.Options{
+			OnTime:        cfg.OnTime,
+			RetentionDays: cfg.Maintain.RetentionDays,
+			LookaheadDays: cfg.Maintain.PartitionLookahead,
+			Settle:        rollupSettle,
+		}, time.Now, log)
+		tickCtx, cancelTick := context.WithTimeout(context.Background(), 10*time.Minute)
+		err := job.Tick(tickCtx)
+		cancelTick()
+		db.Close()
+		if err != nil {
+			log.Error("maintenance failed", "component", "main", "err", err.Error())
+			os.Exit(1)
+		}
+		log.Info("maintenance done", "component", "main")
 		return
 	}
 
@@ -191,10 +214,8 @@ func main() {
 		RetentionDays: cfg.Maintain.RetentionDays,
 		LookaheadDays: cfg.Maintain.PartitionLookahead,
 		Interval:      cfg.Maintain.Interval,
-		// Three hours after an hour ends: a train later than that is rare,
-		// and /history is then at most four hours behind (§16 q12).
-		Settle:       3 * time.Hour,
-		ExpireFilter: func(before time.Time) { pipeline.ExpireFilterBefore(before) },
+		Settle:        rollupSettle,
+		ExpireFilter:  func(before time.Time) { pipeline.ExpireFilterBefore(before) },
 	}, time.Now, log)
 	background.Add(1)
 	go func() {
@@ -253,6 +274,11 @@ func main() {
 	default:
 	}
 }
+
+// rollupSettle is how long after an hour ends it is rolled up: a train later
+// than three hours is rare, and /history is then at most four hours behind
+// (§16 q12).
+const rollupSettle = 3 * time.Hour
 
 // decodeAndIngest decodes and converts on the poller's goroutine (§9.4), then
 // publishes the poll to the latest-state cache and hands each observation to
