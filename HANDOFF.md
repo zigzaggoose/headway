@@ -32,14 +32,22 @@ clamps early running to zero, because that would bias every on-time percentage.
 
 ## Do this next
 
-**`internal/api`** — `/v1/lines/{id}/now` over `internal/cache` (done 2026-09-23, wired
-into `main`, nothing reads it yet), plus `/healthz` and `/readyz`.
+**`deploy/`** — `Dockerfile` (multi-stage, `CGO_ENABLED=0`, `GOARCH=amd64`, distroless
+nonroot) and `docker-compose.yml` (postgres + headway, volume, healthchecks, restart
+policy). The last Stage 1 code item; everything else in Stage 1 needs the VM.
+
+**Set `stop_grace_period` in Compose to at least 45s.** Shutdown spends up to
+`HTTP_SHUTDOWN_GRACE` (20 s) draining HTTP and up to another 20 s draining the writer.
+Docker's default is 10 s, after which it sends SIGKILL and the final batch is lost.
+
+The API is done (2026-09-23): `/healthz`, `/readyz`, `/v1/lines/{id}/now`, and the
+full §9.4 shutdown order. Four §7 additions were approved by the user and are in
+§15. Until Stage 2, a route with nothing running is a 404 — there is no schedule to
+say it exists.
 
 The BinaryLane VM is deferred by the user's choice (2026-09-23) — not paying yet.
 Rows are being written locally, but nothing captures while the laptop is off, and
 that history is not recoverable. Raise it again when `deploy/` is ready.
-
-Then Stage 1's remaining items: the HTTP drain step of §9.4, `deploy/`, the VM.
 
 ## Completed this session
 

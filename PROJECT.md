@@ -694,7 +694,9 @@ GET /v1/lines?mode=2&limit=2
 
 Current state of every active trip on a route, from the latest-state cache. Never queries `observations`.
 
-Query params: `direction` (`0`, `1`, omitted = both), `limit` (default 100).
+Query params: `direction` (`0`, `1`, omitted = both), `limit` (default 100, max 1000).
+
+`summary` counts every trip on the route before `limit` is applied. `active_trips` excludes cancelled trips, which are counted in `cancelled`; a trip with no known delay is active but in no status bucket. `median_delay_s` is the lower middle on an even count, so it is always a delay some trip actually has.
 
 ```
 GET /v1/lines/T1-EXAMPLE/now?direction=0
@@ -708,6 +710,7 @@ GET /v1/lines/T1-EXAMPLE/now?direction=0
   "feed_age_s": 9,
   "summary": {
     "active_trips": 38,
+    "early": 0,
     "on_time": 31,
     "late": 6,
     "very_late": 1,
@@ -739,6 +742,8 @@ GET /v1/lines/T1-EXAMPLE/now?direction=0
 ```
 
 Errors: `404 line_not_found` if `route_id` is absent from the active schedule. `200` with an empty `trips` array if the route exists but nothing is running.
+
+**Stage 1 (no schedule loaded):** a route is known only if it is in a fresh feed snapshot, so a real line with nothing running is also `404 line_not_found`, with the message saying "in the live feed". `short_name`, `headsign`, `vehicle_id` when the feed leaves it empty, and `next_stop.name` / `stop_sequence` / `scheduled` / `predicted` are omitted; `next_stop` is the first stop the feed still reports for the trip, and its `status` is `early`, `on_time`, `late`, `very_late` or `unknown`. The data-endpoint `503 not_ready` rule for a missing schedule applies from Stage 2.
 
 #### `GET /v1/stops/{stop_id}/now`
 
@@ -838,7 +843,7 @@ Liveness. Returns `200 {"status":"ok"}` if the process is running. No dependency
 
 #### `GET /readyz`
 
-Readiness. `200` only if all of: a schedule version is active and loaded into the cache, the Postgres pool can `SELECT 1` within 2 s, and at least one feed has succeeded within `READY_MAX_FEED_AGE` (default 120 s). Otherwise `503` with a `reasons` array.
+Readiness. `200` only if all of: a schedule version is active and loaded into the cache, the Postgres pool can `SELECT 1` within 2 s, and at least one feed has succeeded within `READY_MAX_FEED_AGE` (default 120 s). Otherwise `503` with the §7.2 envelope (`code: not_ready`) and a top-level `reasons` array beside `error`, one human-readable string per failed check. "A feed has succeeded" is measured by the newest feed snapshot in the latest-state cache, which exists only after a fetch and a decode both succeeded. **Stage 1:** the schedule check is absent until a schedule exists.
 
 #### `GET /metrics`
 
@@ -864,6 +869,7 @@ Every non-2xx response, without exception:
 | 400 | `range_too_large` | `to - from` exceeds `HISTORY_MAX_DAYS`. |
 | 404 | `line_not_found` | Unknown `route_id`. |
 | 404 | `stop_not_found` | Unknown `stop_id`. |
+| 404 | `not_found` | No endpoint at this path. Without it the router would answer in plain text. |
 | 429 | `too_many_requests` | Per-IP limiter tripped. `Retry-After` set. |
 | 500 | `internal` | Anything unexpected. `message` is always the literal string `"internal error"`; detail goes to the log keyed by `request_id`. |
 | 503 | `not_ready` | Only from `/readyz`, and from data endpoints when no schedule version is loaded. |
@@ -1467,8 +1473,8 @@ Each stage ends in something that runs and can be demonstrated. **Stage 2 is the
 - [x] `cmd/fixturedump`: capture two consecutive live responses into `testdata/`, plus `derive` for the cancelled, added, past-midnight and truncated fixtures.
 - [x] `internal/ingest`: bounded channel, change filter, batch writer with `ON CONFLICT DO NOTHING`. 95.8 % covered. Wired into `main` 2026-09-23 through `match.Unmatched`: a 50 s live run wrote 3,887 rows from 4 polls, 0 failed, 0 dropped, final batch flushed on SIGINT.
 - [x] `internal/cache`: latest-state cache. Per-feed snapshots swapped under an `RWMutex`, 100 % covered, race test verified to fail without the lock.
-- [ ] `internal/api`: `/v1/lines/{id}/now` (unmatched-only fields), `/healthz`, `/readyz`.
-- [ ] Ordered graceful shutdown per §9.4.
+- [x] `internal/api`: `/v1/lines/{id}/now` (unmatched-only fields), `/healthz`, `/readyz`. 98.5 % covered; verified live against a real route (18 active trips, feed age 7 s).
+- [x] Ordered graceful shutdown per §9.4. All six steps in `main`; a live SIGINT drained HTTP, flushed the writer and exited 0 with 0 rows lost.
 - [ ] `deploy/Dockerfile` (amd64, distroless) and `deploy/docker-compose.yml`.
 - [ ] BinaryLane VM provisioned; `deploy/vm-bootstrap.md` written while doing it, not after.
 - [ ] Deployed and reachable. Screenshot of a live `/v1/lines/{id}/now` response in the README.
@@ -1715,6 +1721,8 @@ Append-only. To reverse a decision, add a row that names the one it supersedes.
 | 2026-09-23 | `ServiceDayStart` is noon minus twelve hours as GTFS specifies, which on the October transition is 23:00 the previous evening and on the April transition 01:00. §7.3's comment and §9.2 case 3 had assumed local midnight on the October day and are corrected. `CandidateServiceDates` takes the overlap as a parameter and decides ownership by `ServiceDayStart`, not the calendar date. | The rule was already chosen in §9.2; the examples contradicted it. With a midnight-based owner, 23:00–24:00 before the October change and 00:00–01:00 on the April change are attributed to the wrong service date. The overlap is a parameter because components never read config (§8). | Local midnight as the reference (contradicts GTFS and the chosen approach); calendar-date ownership (wrong for two hours a year); reading `SERVICE_DAY_OVERLAP_H` from a package variable. |
 | 2026-09-23 | Stage 1 stores unmatched observations through `match.Unmatched`, which skips and counts what it cannot key: trip-level updates (103–152 per poll, the cancellations), updates with no `stop_id`, and an unreadable `start_date`. Without `start_date` the service date is the newest `CandidateServiceDates` entry. | Rows start accumulating now, not at Stage 2, and the feed is not archived anywhere else. Trip-level updates need the timetable to expand into stops (§9.1 case 3). A bad `start_date` is counted rather than replaced, because §9.2 case 7 trusts it. The conversion lives in `internal/match` because §7.3 puts RawUpdate → Observation there; `main` stays wiring only. | Waiting for the matcher before storing anything (loses days of data); a sentinel stop id such as `~trip` for trip-level rows (a fake key the matcher would have to undo); falling back to the clock on a bad `start_date`. Known cost: between 00:00 and 06:00 a trip without `start_date` that began the previous evening gets today's service date until the matcher can check the schedule. |
 | 2026-09-23 | The latest-state cache replaces a feed's whole snapshot on every poll and applies `CACHE_TTL` to the feed, on read, instead of expiring entries individually with a sweep goroutine. A trip's next stop is its first stop-time update in feed order. | A trip missing from the latest poll has finished or been withdrawn; per-entry expiry would keep showing it for up to `CACHE_TTL`. Whole-snapshot replacement needs no goroutine and no per-trip bookkeeping, and readers take the lock only to copy map pointers. The feed never sends `stop_sequence`, so feed order is the only unmatched signal for which stop is next. | Per-trip TTL plus a one-minute sweep (§4.2 as first written: stale trips, one more goroutine); merging each poll into the previous state (same staleness). |
+| 2026-09-23 | Four additions to §7, approved by the user: a `not_found` error code for unknown paths; `summary.early`; a 1000 cap on `/now` `limit`; `reasons` beside the envelope on a `/readyz` 503. | §7.2 requires the envelope on every non-2xx and no existing code fit an unknown path. Without `early` the status buckets would not sum to `active_trips`. `limit` needs a range to be "out of range"; 1000 matches `/v1/lines`. The readiness reasons need a home that keeps the envelope's shape. | Letting the mux answer 404/405 in plain text; folding early trips into `on_time`; an unbounded limit. |
+| 2026-09-23 | Stage 1 API semantics without a schedule: a route is known iff it is in a fresh feed snapshot; readiness checks the database and feed freshness only; feed freshness for readiness is the newest snapshot in the latest-state cache rather than poller state. No per-request timeout or per-IP limiter yet. | Nothing else can answer "does this route exist" until the schedule loader; readiness from the cache needs no new shared state in the pollers. `/now` reads memory, so a handler timeout guards nothing until the history endpoints query Postgres. | A 200 with empty trips for any unknown id (hides typos); exporting poller stats for readiness (more cross-goroutine state for the same answer). Per-IP limiting and `http.TimeoutHandler` land with the history endpoints in Stage 2. |
 
 ---
 

@@ -5,10 +5,13 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io/fs"
 	"log/slog"
+	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"sync"
@@ -22,6 +25,7 @@ import (
 	_ "time/tzdata"
 
 	"github.com/zigzaggoose/headway"
+	"github.com/zigzaggoose/headway/internal/api"
 	"github.com/zigzaggoose/headway/internal/cache"
 	"github.com/zigzaggoose/headway/internal/config"
 	"github.com/zigzaggoose/headway/internal/feed"
@@ -82,6 +86,15 @@ func main() {
 		return
 	}
 
+	// Bind before anything starts, so a port already in use is a refusal to
+	// start (exit 2) rather than a service that ingests with no API.
+	ln, err := net.Listen("tcp", cfg.HTTP.Addr)
+	if err != nil {
+		log.Error("cannot start", "component", "main", "err", err.Error())
+		db.Close()
+		os.Exit(2)
+	}
+
 	pipeline := ingest.NewPipeline(db.Pool(), ingest.PipelineConfig{
 		QueueSize:        cfg.Ingest.QueueSize,
 		BatchSize:        cfg.Ingest.BatchSize,
@@ -93,10 +106,35 @@ func main() {
 	latest := cache.New(cfg.HTTP.CacheTTL, time.Now)
 
 	// Shutdown is ordered and the order matters (§9.4): cancel the pollers,
-	// then wait for every producer to return, and only then close what they
-	// write into. Draining HTTP (step 2) arrives with internal/api.
+	// drain HTTP, wait for every producer to return, and only then close what
+	// they write into.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	srv := &http.Server{
+		Handler: api.NewHandler(api.Options{
+			Cache:           latest,
+			Ping:            db.Ping,
+			OnTime:          cfg.OnTime,
+			ReadyMaxFeedAge: cfg.HTTP.ReadyMaxFeedAge,
+			Now:             time.Now,
+			Log:             log,
+		}),
+		ReadHeaderTimeout: cfg.HTTP.ReadTimeout,
+		ReadTimeout:       cfg.HTTP.ReadTimeout,
+		WriteTimeout:      cfg.HTTP.WriteTimeout,
+	}
+	serveErr := make(chan error, 1)
+	go func() {
+		if err := srv.Serve(ln); !errors.Is(err, http.ErrServerClosed) {
+			// The API dying is not a reason to lose ingestion silently, and
+			// not a reason to keep running without it either: shut down in
+			// order and exit non-zero so the restart policy brings it back.
+			serveErr <- err
+			stop()
+		}
+	}()
+	log.Info("http listening", "component", "main", "addr", ln.Addr().String())
 
 	// One client and one limiter for every feed: the connection pool is worth
 	// sharing, and both the rate limit and the daily quota are per account.
@@ -124,6 +162,12 @@ func main() {
 	stop()
 
 	log.Info("shutdown started", "component", "main")
+	// Step 2. The deadline is its own, not ctx: ctx is already cancelled.
+	drainCtx, cancelDrain := context.WithTimeout(context.Background(), cfg.HTTP.ShutdownGrace)
+	if err := srv.Shutdown(drainCtx); err != nil {
+		log.Error("http did not drain", "component", "main", "err", err.Error())
+	}
+	cancelDrain()
 	pollers.Wait() // step 3: no new observations can be produced
 	// Steps 4 and 5: close the channel and let the writer flush. The grace
 	// is the HTTP one because config already requires it to exceed a flush.
@@ -140,6 +184,12 @@ func main() {
 		"rows_failed", st.Failed,
 		"dropped", st.Dropped,
 	)
+	select {
+	case err := <-serveErr:
+		log.Error("exiting after the http server failed", "component", "main", "err", err.Error())
+		os.Exit(1)
+	default:
+	}
 }
 
 // decodeAndIngest decodes and converts on the poller's goroutine (§9.4), then

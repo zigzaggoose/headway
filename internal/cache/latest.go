@@ -120,3 +120,18 @@ func (c *Cache) Route(routeID string) (trips []Trip, asOf time.Time, found bool)
 	}
 	return trips, asOf, found
 }
+
+// Newest returns the most recent feed timestamp across all feeds, or the zero
+// time before the first poll lands. Readiness uses it: a snapshot exists only
+// after a fetch and a decode have both succeeded.
+func (c *Cache) Newest() time.Time {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	var newest time.Time
+	for _, s := range c.feeds {
+		if s.feedTS.After(newest) {
+			newest = s.feedTS
+		}
+	}
+	return newest
+}

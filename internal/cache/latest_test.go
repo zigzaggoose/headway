@@ -173,3 +173,15 @@ func TestCache_ReadsDuringUpdates_AreRaceFree(t *testing.T) {
 	}()
 	wg.Wait()
 }
+
+func TestNewest_AcrossFeeds_IsTheLatestFeedTimestamp(t *testing.T) {
+	c := New(45*time.Minute, fixedClock(t0))
+	if got := c.Newest(); !got.IsZero() {
+		t.Fatalf("empty cache: newest = %s, want zero", got)
+	}
+	c.Update("trains", t0, nil)
+	c.Update("metro", t0.Add(-time.Minute), nil)
+	if got := c.Newest(); !got.Equal(t0) {
+		t.Errorf("newest = %s, want %s", got, t0)
+	}
+}
