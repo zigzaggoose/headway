@@ -133,8 +133,10 @@ design, and the matcher depends on them:
 
 Not blocking, but Stage 1 cannot finish without the first two:
 
-1. **Oracle Cloud Always Free VM** (arm64) — signup in progress. Capacity is
-   intermittent; §16 q6 budgets a week of retries before falling back to GCP e2-micro.
+1. **BinaryLane VM** — Standard 1 GB, Sydney, Ubuntu 24.04, x86-64 (so builds target
+   `linux/amd64`). Replaces Oracle (debit card rejected) and Azure for Students (expiry
+   cliff); §16 q6 and the §15 row of 2026-09-23 have the sizing. Buy it once `main`
+   writes rows, not before — until then the VM would capture nothing.
    Paste what gets run on the VM so `deploy/vm-bootstrap.md` is written from reality.
 2. **Confirm the TfNSW plan** is the default 60,000/day at 5/s. `FEED_RATE_LIMIT_RPS=4`
    and `FEED_DAILY_BUDGET=55000` are sized against exactly that.

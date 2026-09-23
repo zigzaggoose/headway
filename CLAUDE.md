@@ -33,7 +33,7 @@ about SQL, the API never writes.
 ## Stack
 
 Go 1.27 · PostgreSQL 18 · `net/http.ServeMux` · `log/slog` · Docker · deployed to
-`linux/arm64`.
+`linux/amd64`.
 
 Three direct dependencies, and §3.1 caps v1 at six:
 
@@ -66,7 +66,7 @@ is missing.
 | `make test` | Unit tests, `-race`, no cache. |
 | `make test-integration` | Adds the `//go:build integration` tests. Needs a database; skips without `DATABASE_URL_TEST`. |
 | `make lint` | `go vet` + `gofmt -l`. Both must be clean. |
-| `make cross` | `GOOS=linux GOARCH=arm64` build. Catches the most likely deployment failure. |
+| `make cross` | `GOOS=linux GOARCH=amd64` build. Catches the most likely deployment failure. |
 | `make fixtures` | Record live feed fixtures. Consumes API quota — by hand only. |
 
 There is no typechecker step beyond `go build` and `go vet`.

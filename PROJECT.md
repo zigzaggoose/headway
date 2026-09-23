@@ -69,10 +69,10 @@ Versions are pinned. Where a version is stated below it was checked against the 
 | prometheus/client_golang | latest v1 | `/metrics` (Stage 4) | Hand-written text exposition | Histograms with correct bucket accounting are tedious to hand-roll. Not a dependency until Stage 4. |
 | Docker + Docker Compose | Compose v2 | Local dev and deployment | systemd unit + host Postgres | One `docker compose up` reproduces production on a laptop, and the learning goal includes Docker. |
 | Base image (build) | `golang:1.27-bookworm` | Compile stage | `golang:1.27-alpine` | CGO is off, so libc does not matter; bookworm avoids musl surprises if CGO is ever needed. |
-| Base image (runtime) | `gcr.io/distroless/static-debian12:nonroot` | Runtime stage | `alpine`, `scratch` | No shell, no package manager, runs as non-root, ~2 MB. Works with `CGO_ENABLED=0` static binaries on `linux/arm64`. |
+| Base image (runtime) | `gcr.io/distroless/static-debian12:nonroot` | Runtime stage | `alpine`, `scratch` | No shell, no package manager, runs as non-root, ~2 MB. Works with `CGO_ENABLED=0` static binaries on `linux/amd64`. |
 | Postgres image | `postgres:18-alpine` | Local and deployed database | Managed Postgres | Free. Pin the digest in `deploy/docker-compose.yml`; verify the exact tag exists on Docker Hub before pinning a patch-level tag such as `18.6-alpine`. |
 | GitHub Actions | — | CI | Drone, self-hosted runner | Free for public repos, service containers give a real Postgres for integration tests. |
-| Oracle Cloud Always Free, Ampere A1 (arm64), Ubuntu LTS | — | Deployment target | Google Cloud e2-micro | More RAM. Build target is `linux/arm64`; this is easy to forget and produces an `exec format error` on the VM. Fallback documented in §16. |
+| BinaryLane Standard 1 GB (x86-64, 1 vCPU, 1 GB, 20 GB NVMe), Ubuntu 24.04 LTS, Sydney | — | Deployment target | Oracle Cloud Always Free Ampere A1; Azure B2pts v2 (Students); Hetzner CAX11; BinaryLane 2 GB | AUD 4.90/month ex GST, billed hourly, no expiry and no idle reclamation, same city as the TfNSW API. Oracle rejected a debit-card signup and Azure for Students stops the capture when the credit runs out — §15, 2026-09-23. Build target is `linux/amd64`; the dev laptop is arm64, so a missed `GOARCH` produces an `exec format error` on the VM. 1 GB RAM and a 20 GB disk are the binding constraints — see §16 q6. |
 | Next.js | latest stable at Stage 4 | One-page dashboard | Plain HTML + fetch | Stage 4 only, and the point is to have TypeScript in the repo. Do not start it before Stage 4. |
 | k6 *or* hey | — | Load testing | wrk | Either is acceptable; record which one was used in `docs/loadtest.md`. |
 
@@ -358,10 +358,10 @@ headway/
 │   └── gtfs_mini.zip                       10 trips, 40 stop_times, 2 routes, hand-built.
 │
 ├── deploy/
-│   ├── Dockerfile                    Multi-stage, CGO_ENABLED=0, GOARCH=arm64, distroless.
+│   ├── Dockerfile                    Multi-stage, CGO_ENABLED=0, GOARCH=amd64, distroless.
 │   ├── docker-compose.yml            postgres + headway. Volumes, healthchecks, restart policy.
 │   ├── docker-compose.override.yml   Local only: port mapping, hot env.
-│   └── vm-bootstrap.md               Exact commands run on a fresh Oracle VM. Keep current.
+│   └── vm-bootstrap.md               Exact commands run on a fresh BinaryLane VM. Keep current.
 │
 ├── docs/
 │   ├── loadtest.md                   Load test script, raw numbers, date, machine.
@@ -374,7 +374,7 @@ headway/
 └── .github/
     └── workflows/
         ├── ci.yml                    vet, build, unit tests, integration tests, coverage.
-        └── docker.yml                Build and push the arm64 image on a tag.
+        └── docker.yml                Build and push the amd64 image on a tag.
 ```
 
 ---
@@ -1275,7 +1275,7 @@ Step 4 must happen only after step 3. Closing a channel that a producer still wr
 5. Shutdown while a schedule load is in progress → the load's context is cancelled, the partially loaded version is never activated, and the orphan `schedule_versions` row with `active=false` is cleaned up by the next successful load (delete versions older than the newest three, active or not).
 6. The queue is full *during shutdown* → producers have already stopped at step 3, so this cannot happen. Assert it with a test.
 7. A panic in a poller goroutine → a `recover` wrapper logs at ERROR with the stack and restarts that poller after a backoff. One bad feed must not take down ingestion for the others.
-8. `GOMAXPROCS` on the Ampere A1 VM → the VM has several cores; do not pin it. If the container is CPU-limited in Compose, set `GOMAXPROCS` to match, since the Go runtime does not read cgroup CPU limits.
+8. `GOMAXPROCS` on the deployment VM → the BinaryLane VM has 1 vCPU and the runtime already sees it; do not pin it. If the container is CPU-limited in Compose, set `GOMAXPROCS` to match, since the Go runtime does not read cgroup CPU limits.
 
 ### 9.5 Feed timestamps, clock skew and staleness
 
@@ -1441,9 +1441,9 @@ One alert is required by the Definition of Done; these are the candidates, in pr
 6. `go test -race -count=1 ./...` (unit only).
 7. Start a `postgres:18-alpine` service container; run `go test -race -tags=integration -count=1 ./...` with `DATABASE_URL_TEST` pointed at it.
 8. `go test -coverprofile=coverage.out ./...` and print the total. No coverage gate in v1 — a gate on a project this size encourages testing the wrong things. [DECIDED — revisit at Stage 4.]
-9. Cross-compile check: `GOOS=linux GOARCH=arm64 go build ./cmd/headway`. This catches the single most likely deployment failure.
+9. Cross-compile check: `GOOS=linux GOARCH=amd64 go build ./cmd/headway`. This catches the single most likely deployment failure.
 
-`.github/workflows/docker.yml`, on a tag: build `linux/arm64` and push to GitHub Container Registry.
+`.github/workflows/docker.yml`, on a tag: build `linux/amd64` and push to GitHub Container Registry.
 
 ---
 
@@ -1465,8 +1465,8 @@ Each stage ends in something that runs and can be demonstrated. **Stage 2 is the
 - [ ] `internal/cache`: latest-state cache.
 - [ ] `internal/api`: `/v1/lines/{id}/now` (unmatched-only fields), `/healthz`, `/readyz`.
 - [ ] Ordered graceful shutdown per §9.4.
-- [ ] `deploy/Dockerfile` (arm64, distroless) and `deploy/docker-compose.yml`.
-- [ ] Oracle Cloud VM provisioned; `deploy/vm-bootstrap.md` written while doing it, not after.
+- [ ] `deploy/Dockerfile` (amd64, distroless) and `deploy/docker-compose.yml`.
+- [ ] BinaryLane VM provisioned; `deploy/vm-bootstrap.md` written while doing it, not after.
 - [ ] Deployed and reachable. Screenshot of a live `/v1/lines/{id}/now` response in the README.
 - **Demo:** "this URL shows what the T1 is doing right now, and it has been running since Tuesday."
 
@@ -1480,7 +1480,7 @@ Each stage ends in something that runs and can be demonstrated. **Stage 2 is the
 - [ ] `migrations/0003`: rollup tables; `internal/rollup` hourly job with the retention guard.
 - [ ] `/v1/stops/{id}/history` and `/v1/lines/{id}/history`.
 - [ ] `/v1/lines`, `/v1/stops/{id}/now`, `/v1/admin/stats`.
-- [ ] `.github/workflows/ci.yml` complete including the Postgres service container and the arm64 cross-compile.
+- [ ] `.github/workflows/ci.yml` complete including the Postgres service container and the amd64 cross-compile.
 - [ ] Match rate measured and recorded. If below 90 %, fix before moving on.
 - [ ] README: architecture diagram, the numbers from §13, how to run it.
 - **Demo:** "here is how often the T1 was late at Strathfield last week, by hour."
@@ -1524,10 +1524,10 @@ These are the numbers that go in the README and on the resume. Anything marked "
 | API p95 latency, `/now` | k6/hey at 50 RPS for 5 min | ≤ 100 ms |
 | API p95 latency, `/history` (30 d, hourly) | same run | ≤ 300 ms |
 | API p99 latency, `/now` | same run | ≤ 250 ms |
-| Storage per day, raw | `pg_total_relation_size('observations_YYYY_MM_DD')` | **First measurement 2026-09-21: 276.9 bytes/row** (632 kB heap + 568 kB indexes over 4,586 rows, in `observations_default`). Projected from the off-peak write rate: ~270 MB/day, ~3.7 GB at 14 days retention, against the ≤ 20 GB target. Treat as a floor: one feed, off-peak, and a small table whose index overhead does not yet amortise. Re-measure per §12 Stage 3. |
+| Storage per day, raw | `pg_total_relation_size('observations_YYYY_MM_DD')` | **First measurement 2026-09-21: 276.9 bytes/row** (632 kB heap + 568 kB indexes over 4,586 rows, in `observations_default`). Projected from the off-peak write rate: ~270 MB/day, ~1.9 GB at the deployed 7 days (§16 q6), ~3.7 GB at the 14-day default, against the ≤ 10 GB target. Treat as a floor: one feed, off-peak, and a small table whose index overhead does not yet amortise. Re-measure per §12 Stage 3. |
 | Storage per day, rollups only | Size delta of `otp_*_hourly` per day | baseline TBD |
 | Storage reduction from rollups | `1 − (rollup bytes / raw bytes)` for the same day | baseline TBD; report honestly |
-| Total database size at steady state | `pg_database_size('headway')` after `RETENTION_DAYS` have elapsed | ≤ 20 GB |
+| Total database size at steady state | `pg_database_size('headway')` after `RETENTION_DAYS` have elapsed | ≤ 10 GB |
 | Match rate | `headway_match_rate`, trains feed, excluding `ADDED` | ≥ 0.90 |
 | Upstream requests per day | `increase(headway_feed_requests_total[24h])` | ≤ `FEED_DAILY_BUDGET` |
 | Test count and coverage | `go test ./... -coverprofile` total | baseline TBD; report the number, not a grade |
@@ -1706,6 +1706,8 @@ Append-only. To reverse a decision, add a row that names the one it supersedes.
 | 2026-09-21 | Filter eviction removes a tenth of the map, oldest first, when the bound is reached. | The scan is then amortised over many admissions instead of running on every one past the bound. Eviction costs a redundant write the next time that key appears and never produces a wrong row, so approximate is good enough. | Exact LRU (a linked list and a second map, to decide which redundant write to pay for); evicting one entry per admission (a full sort per observation at the bound). |
 | 2026-09-21 | Ingest counters are read through `Stats()` snapshots — atomics in the writer, mutex-guarded in the filter — and the four writer counters are not read at one instant. | `/v1/admin/stats` and the metrics collectors read these while the writer goroutine is mutating them, which was an actual data race found by review and reproduced under `-race`. Nothing depends on the counters agreeing with each other, and taking a lock to make them agree would put the reporting path inside the write path. | Plain counters (the race); a mutex around all four (reporting contends with writing); a single seqlock (complexity for a consistency nobody needs). |
 | 2026-09-21 | `Filter.Forget` does not decrement the admitted counter. | "Admitted" means "passed the change filter", which a dropped observation did; the queue refusing it afterwards is a separate event with its own counter (§10.3 has both). Decrementing would also undercount whenever the entry being forgotten belongs to a later admission than the one that was dropped. | Decrementing (drifts out of line with reality and conflates two metrics). |
+| 2026-09-22 | Deployment target is an Azure B2pts v2 (Ampere arm64, 2 vCPU, 1 GiB) on an Azure for Students subscription, Australia East. Supersedes the Oracle Cloud Always Free target in §3 and the fallback in §16 q6. | Oracle Always Free capacity was never available to this account. B2pts v2 is arm64, so nothing about the build, the runtime image or `make cross` changes, and it is free-tier eligible for 12 months. | Google Cloud e2-micro and Azure B1s (both x86 — would have forced `GOARCH=amd64` and contradicted the runtime-image row above); Hetzner CAX11 (arm64, 4 GiB, ~€3.79/mo — more RAM and no expiry, but not free and not already paid for). |
+| 2026-09-23 | Deployment target is a BinaryLane Standard 1 GB VM in Sydney, x86-64, AUD 4.90/month ex GST. Supersedes the 2026-09-22 Azure row and, for architecture only, the 2026-09-21 runtime-image row: builds now target `linux/amd64`. §13's database-size target drops from 20 GB to 10 GB to fit a 20 GB disk alongside the OS and images. | Oracle Always Free rejected the signup (debit card, no credit card available). Azure for Students is disabled, not billed, when its credit runs out, which silently stops a capture meant to run indefinitely. A paid VM around AUD 5/month was acceptable. BinaryLane is the cheapest option checked on 2026-09-23 and needs no signup approval. Switching to amd64 costs only the `make cross` target now, because `deploy/` does not exist yet. The measured ~270 MB/day puts 7 days of one feed at ~1.9 GB. | Oracle PAYG (card rejected); Azure for Students (expiry cliff); Hetzner CAX11 (arm64, 4 GB, but €5.99/month after the June 2026 increase, ~AUD 11, and in Europe); Hetzner CX23 (€5.49 + IPv4, Europe); BinaryLane 2 GB (AUD 9.80, needed only for more than one feed). |
 
 ---
 
@@ -1720,8 +1722,8 @@ Each needs the human's input. Each has a default that will be used until it is a
 | 3 | **Arrival or departure?** On-time performance can be measured at arrival (what a passenger waiting at the destination sees) or departure (what a passenger boarding sees). They differ at terminus stops and at stops with long dwell times. | `observed_delay_s` = `departure_delay` when present, else `arrival_delay`, else `NULL`. Rationale: most stops in the feed are intermediate and the boarding passenger is the primary user. Both raw values are stored, so the choice is reversible without re-ingesting. |
 | 4 | **How do cancellations count in the on-time percentage?** Excluding them flatters the number; counting them as "not on time" conflates two different failures. | Excluded from `on_time_pct` and reported as a separate `n_cancelled` column, which the API returns alongside. The README says so explicitly. |
 | 5 | **Which feeds at Stage 3, and in what order?** Each feed costs quota and adds edge cases. Buses is by far the largest. | Order: metro, ferries, light rail, then buses last. Enable them one at a time and check the daily request count after each. |
-| 6 | **Is an Oracle Cloud Always Free Ampere instance actually available?** Capacity in a given region is intermittently unavailable, and signup requires a card. | Try Oracle first. If capacity is unavailable after a week of retrying, fall back to a Google Cloud e2-micro free-tier instance and reduce to one feed, `RETENTION_DAYS=7`, `DB_MAX_CONNS=5`. Record which one was used in `deploy/vm-bootstrap.md`. |
-| 7 | **Retention window.** 14 days is a guess made before measuring. | 14 days. Revisit once `docs/storage.md` has a real bytes-per-day figure. |
+| 6 | **ANSWERED 2026-09-23 — see the Decision Log.** Supersedes the 2026-09-22 answer (Azure). Oracle Always Free rejected signup with a debit card; the Azure for Students plan was dropped for its expiry cliff. | **Decided:** BinaryLane Standard 1 GB, Sydney, Ubuntu 24.04, x86-64. 1 GB RAM and 20 GB disk are the constraints, so: one feed, `RETENTION_DAYS=7`, `DB_MAX_CONNS=5`, Postgres `shared_buffers=128MB`, and a 2 GB swapfile. Paid by debit card or by prepaid PayPal funds; with PayPal an empty balance suspends the server and the capture stops, so record the top-up date in `deploy/vm-bootstrap.md`. Resize to the 2 GB plan (AUD 9.80) if Stage 3 enables a second feed. |
+| 7 | **Retention window.** 14 days is a guess made before measuring. | 14 days as the `RETENTION_DAYS` default; the 1 GB deployment overrides it to 7 (q6). Revisit once `docs/storage.md` has a real bytes-per-day figure. |
 | 8 | **Custom domain?** Roughly $15–25 AUD/year, plus TLS to configure. | No domain. Serve on the VM's IP over HTTP for the demo, or put Caddy in front if a domain is bought later. Not on the Stage 1–3 critical path. |
 | 9 | **Should vehicle positions be ingested at all?** They would allow a map and a "where is the train" view, at roughly double the quota cost and a second table. | No. Explicitly a non-goal for v1 (§2). Revisit only after Stage 4 is complete. |
 | 11 | **ANSWERED 2026-09-21 — see the Decision Log.** The observations primary key included `stop_sequence`, and the feed never sends one. Order-1 and order-2 matches can take it from the timetable, but an unmatched update (order 4) has no `stop_sequence` and no way to get one — and the column is `NOT NULL` and part of the key. Writing unmatched observations is what tells us the match rate is falling (§15), so they must be storable. The options: a sentinel `stop_sequence` for unmatched rows, which collides when one trip has several unmatched stops; swapping `stop_id` for `stop_sequence` in the key, which collides when a trip visits one stop twice; or adding a synthetic per-update ordinal. This changes `migrations/0002`, so it needs a decision before the matcher is written. | **Decided:** key on `(service_date, feed_id, trip_id, stop_id, feed_ts)`, `stop_sequence` nullable, applied in `migrations/0005`. The cost — a loop service losing its second visit within one feed timestamp — is asserted by `TestWriter_LoopService_LosesTheSecondVisitInOneFeedTimestamp` rather than left to be discovered. |
@@ -1735,7 +1737,6 @@ Each needs the human's input. Each has a default that will be used until it is a
 |---|---|
 | **AEST / AEDT** | Australian Eastern Standard Time (UTC+10) and Australian Eastern Daylight Time (UTC+11). Sydney switches between them twice a year. |
 | **ADDED** | A GTFS-realtime `TripDescriptor.schedule_relationship` value meaning the trip is not in the static timetable. Such trips can never be matched; they are excluded from the match-rate metric. |
-| **Ampere A1** | The arm64 CPU shape offered by Oracle Cloud's Always Free tier. The deployment target, and the reason builds must target `linux/arm64`. |
 | **Backpressure** | Letting a slow consumer slow a fast producer. In Headway the bounded channel is the only backpressure point, and it drops rather than blocks. |
 | **Bronze Plan** | The name TfNSW's documentation gives to the default API account plan, documented as 60,000 requests per day at 5 per second. See Open Question 1. |
 | **CANCELED** | A `TripDescriptor.schedule_relationship` value meaning a scheduled trip will not run. Spelled with one L in the specification. |

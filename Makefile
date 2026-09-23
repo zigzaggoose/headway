@@ -25,7 +25,7 @@ test: ## Unit tests, race detector on, no cache.
 	$(GO) test -race -count=1 ./...
 
 test-integration: ## Unit plus integration tests. Needs DATABASE_URL_TEST.
-	$(GO) test -race -tags=integration -count=1 ./...
+	@$(LOADENV) $(GO) test -race -tags=integration -count=1 ./...
 
 cover: ## Print total coverage. No gate in v1 (§11.3).
 	$(GO) test -coverprofile=coverage.out ./...
@@ -40,8 +40,8 @@ fmt: ## Rewrite files with gofmt.
 vet:
 	$(GO) vet ./...
 
-cross: ## The deployment build. Catches the arm64 mistake CI checks for.
-	GOOS=linux GOARCH=arm64 CGO_ENABLED=0 $(GO) build -o /dev/null ./cmd/headway
+cross: ## The deployment build. Catches the amd64 mistake CI checks for.
+	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 $(GO) build -o /dev/null ./cmd/headway
 
 fixtures: ## Capture a live feed response into testdata/. Needs TFNSW_API_KEY.
 	@$(LOADENV) $(GO) run ./cmd/fixturedump
