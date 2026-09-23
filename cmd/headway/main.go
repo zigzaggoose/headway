@@ -33,6 +33,7 @@ import (
 	"github.com/zigzaggoose/headway/internal/gtfsstatic"
 	"github.com/zigzaggoose/headway/internal/ingest"
 	"github.com/zigzaggoose/headway/internal/match"
+	"github.com/zigzaggoose/headway/internal/rollup"
 	"github.com/zigzaggoose/headway/internal/store"
 )
 
@@ -160,13 +161,29 @@ func main() {
 	// limiter, because the quota is per account.
 	schedules := gtfsstatic.NewLoader(db.Pool(), feed.NewClient(cfg.APIKey, 5*time.Minute, time.Now), limiter,
 		cfg.Service.MaxStopTimeS, cfg.Schedule.KeepVersions, time.Now, log)
-	var loader sync.WaitGroup
-	loader.Add(1)
+	var background sync.WaitGroup
+	background.Add(1)
 	go func() {
-		defer loader.Done()
+		defer background.Done()
 		schedules.Run(ctx, cfg.Feeds, gtfsstatic.Refresh{
 			Hour: cfg.Schedule.RefreshHour, Minute: cfg.Schedule.RefreshMinute, Interval: cfg.Schedule.RefreshInterval,
 		}, matcher)
+	}()
+
+	maintenance := rollup.New(db.Pool(), rollup.Options{
+		OnTime:        cfg.OnTime,
+		RetentionDays: cfg.Maintain.RetentionDays,
+		LookaheadDays: cfg.Maintain.PartitionLookahead,
+		Interval:      cfg.Maintain.Interval,
+		// One hour: long enough for a stop's last update to land, short
+		// enough that /history is at most two hours behind.
+		Lag:          time.Hour,
+		ExpireFilter: func(before time.Time) { pipeline.ExpireFilterBefore(before) },
+	}, time.Now, log)
+	background.Add(1)
+	go func() {
+		defer background.Done()
+		maintenance.Run(ctx)
 	}()
 
 	var pollers sync.WaitGroup
@@ -196,8 +213,8 @@ func main() {
 		log.Error("http did not drain", "component", "main", "err", err.Error())
 	}
 	cancelDrain()
-	pollers.Wait() // step 3: no new observations can be produced
-	loader.Wait()  // an in-flight schedule load has rolled back and let go of the pool
+	pollers.Wait()    // step 3: no new observations can be produced
+	background.Wait() // schedule load and maintenance have stopped and let go of the pool
 	// Steps 4 and 5: close the channel and let the writer flush. The grace
 	// is the HTTP one because config already requires it to exceed a flush.
 	if err := pipeline.Close(cfg.HTTP.ShutdownGrace); err != nil {

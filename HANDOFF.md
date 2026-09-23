@@ -34,12 +34,18 @@ clamps early running to zero, because that would bias every on-time percentage.
 
 ## Do this next
 
-**Rollups: `internal/rollup`** — the hourly job (§4.2 component 9): roll up completed
-hours into `otp_stop_hourly` / `otp_route_hourly`, then drop partitions past
-retention, then pre-create the next `PARTITION_LOOKAHEAD_DAYS`. Everything still
-lands in `observations_default` until this exists, so retention is impossible.
-Then the history endpoints, `/v1/lines`, `/v1/stops/{id}/now`, `/v1/admin/stats`,
-CI, and the README (§12 Stage 2).
+**History endpoints**: `/v1/stops/{id}/history` and `/v1/lines/{id}/history` over
+`otp_*_hourly` (§7.1), then `/v1/lines`, `/v1/stops/{id}/now`, `/v1/admin/stats`, CI,
+README (§12 Stage 2). These are §7 contract work: the shapes are specified, but ask
+before deviating from them.
+
+Rollups are done (2026-09-23): hourly buckets, daily partitions created three days
+ahead, retention guarded by the watermark. On first start against the dev database
+it moved 17,532 rows out of `observations_default`. **The rollup has not yet been
+seen doing real work live** — every row was newer than the one-hour lag at the time.
+Check `otp_route_hourly` after the next run of more than two hours. The schedule
+endpoint was answering 502 for most of that evening; the matcher kept running on
+the stored version, as designed.
 
 The matcher is done (2026-09-23): **99.67 % live match rate**, ~115 MB for the whole
 timetable in memory. Two things found live and fixed: a 502 from the schedule

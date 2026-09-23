@@ -327,8 +327,9 @@ headway/
 │   │   ├── migrate_test.go           Loader rules, retry policy, secret redaction. No database needed.
 │   │   └── store_integration_test.go Tagged `//go:build integration`. Schema per test.
 │   ├── rollup/
-│   │   ├── job.go                    Ordered maintenance run (9).
-│   │   └── job_test.go
+│   │   ├── job.go                    Ordered maintenance run (9): partitions, retention, filter expiry.
+│   │   ├── rollup.go                 The hourly rollup and its watermark.
+│   │   └── job_integration_test.go   Tagged. Every guard in §9.3 against a real Postgres.
 │   ├── api/
 │   │   ├── router.go                 ServeMux patterns. One place that knows about paths.
 │   │   ├── handlers_now.go
@@ -628,7 +629,9 @@ ON CONFLICT DO NOTHING;
 
 ### 6.3 Rollup query shape
 
-The rollup takes the **last** observation per `(service_date, feed_id, trip_id, stop_sequence)` — the final word on what happened at that stop — then aggregates those into hourly buckets. Intermediate updates are not counted, otherwise a trip that was updated fifty times would outweigh a trip updated twice.
+The rollup takes the **last** observation per `(service_date, feed_id, trip_id, stop_id)` — the final word on what happened at that stop — then aggregates those into hourly buckets. Intermediate updates are not counted, otherwise a trip that was updated fifty times would outweigh a trip updated twice.
+
+**Corrected 2026-09-23 (§15); `internal/rollup/rollup.go` is authoritative.** The query below, as first written, has two bugs. (1) It restricts `feed_ts` to the hour *before* taking the last observation, so a prediction made at 07:10 for a 09:00 stop is counted in the 07:00 bucket as well as the 09:00 one. The last word must be taken over all of a visit's rows, then bucketed; the implementation filters `feed_ts >= watermark` inside (exact, because a final in the window is necessarily at or after its start) and `feed_ts < window end` outside. (2) It groups on `service_date`, which is not in the rollup key: around midnight one bucket at one stop holds two service dates, and `ON CONFLICT DO UPDATE` then hits one row twice in one statement, which Postgres rejects (`SQLSTATE 21000`). `service_date` is stored as `max(service_date)` instead. Buckets are `date_trunc('hour', feed_ts, 'UTC')`, not session-timezone dependent. The newest hour is held back by a one-hour lag so a stop's final update can land first.
 
 ```sql
 WITH final AS (
@@ -1493,7 +1496,7 @@ Each stage ends in something that runs and can be demonstrated. **Stage 2 is the
 - [x] `migrations/0001` static tables populated; `schedule_versions` partial unique index verified by a test that tries to double-activate.
 - [x] `internal/match`: schedule cache with atomic swap; resolution orders 1–4; delay derivation per §9.4's reconcile rule. 94.7 % covered. The whole bundle in memory costs ~115 MB RSS (31 MB → 146 MB, measured live).
 - [ ] Every §9.1 edge case has a named subtest and passes.
-- [ ] `migrations/0003`: rollup tables; `internal/rollup` hourly job with the retention guard.
+- [x] `migrations/0003`: rollup tables; `internal/rollup` hourly job with the retention guard. Two bugs in §6.3's SQL found and fixed before they ran (§15); the 17,532 dev rows stranded in `observations_default` moved into a daily partition on first start.
 - [ ] `/v1/stops/{id}/history` and `/v1/lines/{id}/history`.
 - [ ] `/v1/lines`, `/v1/stops/{id}/now`, `/v1/admin/stats`.
 - [ ] `.github/workflows/ci.yml` complete including the Postgres service container and the amd64 cross-compile.
@@ -1735,6 +1738,7 @@ Append-only. To reverse a decision, add a row that names the one it supersedes.
 | 2026-09-23 | The matcher takes a whole poll (`Match(feedID, updates)`) and returns observations plus `Counts`, replacing §7.3's per-update `Match(u) (Observation, error)`. It also replaces `match.Unmatched`: with no schedule loaded, every update takes order 4, which is the same thing. `Matched` means the trip was found (orders 1–3). The producer's `delay` always wins; `time − scheduled` only fills a missing delay, and disagreement beyond `DELAY_RECONCILE_TOLERANCE_S` is counted. The service date is the first candidate on which the trip's service runs and whose scheduled time is within `SERVICE_DATE_TOLERANCE` of the update's predicted time (else header time). | A cancelled trip turns one update into many rows, so one update in, one out does not fit; a poll-sized call also gives the counts the metrics need without shared state. There are no errors to return: every update is kept, skipped with a count, or expanded. The feed never sends `start_date` (0 of 2,912 updates), so the calendar and the stop time are all there is to decide between two candidate dates. | A per-update API with a separate counter object; `time` winning when present (it is relative to our timetable version, `delay` to the producer's); ignoring the calendar and using time alone (a weekday-only trip would be put on Saturday). |
 | 2026-09-23 | The schedule read-back lives in `gtfsstatic` (`Loader.Schedule`), not `store.LoadSchedule` as §7.3 had it, and the refresh loop publishes the active version to the matcher after every attempt, including a failed download. The whole bundle is held in memory. | `ingest` imports `store` and `match` imports `ingest`, so `store` importing `match` is a cycle; the loader already owns the timetable tables' SQL. On 2026-09-23 the schedule endpoint answered 502 at startup and the matcher stayed empty despite an active version in Postgres — a regression test now covers it. Holding every trip costs ~115 MB, measured; filtering to candidate dates would need re-filtering at midnight, and 146 MB total leaves room beside Postgres on 1 GB. | A new package just for the schedule types; publishing only after a successful download; filtering trips by calendar at build time (revisit if the VM runs short of memory). |
 | 2026-09-23 | §9.1 case 17's warning fires when **no** service runs on the load date, superseding "fewer than 50 %". | TfNSW defines one service per weekday pattern: on Wednesday 2026-09-23 only 14.7 % of the bundle's services ran, so the 50 % rule warned every day on a healthy bundle. Zero is the actual signature of a calendar that no longer covers today. | A lower fraction (still a guess about the producer's service structure). |
+| 2026-09-23 | The rollup takes each stop visit's last observation over all its rows and then buckets it, stores `max(service_date)` rather than grouping on it, lags the newest hour by one hour, and runs in one transaction with the watermark. Partition creation moves rows already in `observations_default` into a standalone table and attaches it. Retention drops a partition only if it has no row at or past the watermark. `rollup` gets a filter-expiry function rather than the pipeline. | §6.3's query counted early predictions in the wrong hour and would have failed every midnight with `ON CONFLICT DO UPDATE command cannot affect row a second time` — the regression test reproduces that exact error against the old grouping. Without the move, the first start on any database that ran before this job existed fails to create today's partition. "No row past the watermark" is exact where "service date before the watermark's date" is not, since a service day's rows run into the next morning. | Taking the final observation per hour (§6.3 as written); a service-date-only retention guard; `DETACH`ing the default partition to move rows (locks writes for longer); passing `*ingest.Pipeline` to rollup (breaks §4.2's boundary). |
 
 ---
 
