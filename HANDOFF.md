@@ -34,18 +34,23 @@ clamps early running to zero, because that would bias every on-time percentage.
 
 ## Do this next
 
-**`internal/match`: the matcher** (§9.1 orders 1–4, delay reconcile per §9.5). The
-schedule now loads at startup and daily (`internal/gtfsstatic`, 2026-09-23), but
-nothing reads it yet — `match.Unmatched` is still the only path.
+**Rollups: `internal/rollup`** — the hourly job (§4.2 component 9): roll up completed
+hours into `otp_stop_hourly` / `otp_route_hourly`, then drop partitions past
+retention, then pre-create the next `PARTITION_LOOKAHEAD_DAYS`. Everything still
+lands in `observations_default` until this exists, so retention is impossible.
+Then the history endpoints, `/v1/lines`, `/v1/stops/{id}/now`, `/v1/admin/stats`,
+CI, and the README (§12 Stage 2).
 
-What the data says, measured 2026-09-23 (§9.1 table):
-- 99.1 % of live stop updates find their `(trip_id, stop_id)` in the same-day bundle,
-  and route ids need no mapping. The risk flagged earlier is cleared.
-- The feed never sends `start_date`, so the matcher is what picks between the two
-  candidate service dates near midnight — use the calendar and the stop time.
-- **Memory:** the bundle is 1.24 M stop times / 68,738 trips. Hold only trips whose
-  service runs on a candidate date (today, yesterday), and measure RSS on the real
-  bundle before calling it done — the VM has 1 GB shared with Postgres.
+The matcher is done (2026-09-23): **99.67 % live match rate**, ~115 MB for the whole
+timetable in memory. Two things found live and fixed: a 502 from the schedule
+endpoint left the matcher empty (now it publishes the version already active), and
+the §9.1 case-17 warning fired every day (TfNSW's calendar has one service per
+weekday pattern). Matched rows now show early running (down to −16 s), so the
+"never negative" note in "Where we are" applied to unmatched feed delays only.
+
+Not every §9.1 edge case has its own subtest yet: 12 (`stop_id` not in `stops`, needs
+a stops lookup and a counter), 14 (duplicate entity — relies on the key), 15 and 16
+(covered by design and by the gtfsstatic tests). The §12 box for that stays open.
 
 Stage 1 is code-complete (2026-09-23). The two unticked items are the VM and the
 deployed demo, **deferred by the user's choice — not paying yet**. Rows are written

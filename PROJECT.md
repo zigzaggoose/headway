@@ -293,20 +293,20 @@ headway/
 │   │   ├── types.go                  RawUpdate, DecodedFeed, schedule-relationship constants.
 │   │   └── decode_test.go            Runs against testdata/*.pb fixtures.
 │   ├── gtfsstatic/
-│   │   ├── load.go                   Download, hash, unzip, parse, insert, activate.
-│   │   ├── csv.go                    Streaming CSV reader tolerant of BOM and unknown columns.
-│   │   ├── servicedays.go            calendar + calendar_dates → does service S run on date D.
-│   │   └── load_test.go              Runs against testdata/gtfs_mini.zip.
+│   │   ├── load.go                   Download, hash, one-transaction insert, activate, prune.
+│   │   ├── parse.go                  Streaming zip CSV → COPY, by column name, BOM-tolerant, line-numbered errors.
+│   │   ├── refresh.go                Startup + daily reload; publishes the active version to the matcher.
+│   │   ├── schedule.go               Reads the active version back into a match.Schedule.
+│   │   ├── parse_test.go             Bundles are built in memory; no zip fixture is committed.
+│   │   ├── refresh_test.go
+│   │   └── load_integration_test.go  Tagged; HEADWAY_TEST_BUNDLE runs a downloaded real bundle.
 │   ├── servicetime/
 │   │   ├── servicetime.go            GTFS "HH:MM:SS" (HH may exceed 23) ↔ seconds; service day maths.
 │   │   └── servicetime_test.go       DST cases are the whole point of this package.
 │   ├── match/
-│   │   ├── schedule.go               Schedule struct, loader, atomic swap.
-│   │   ├── matcher.go                RawUpdate → Observation.
-│   │   ├── unmatched.go              The no-schedule conversion (§9.1 order 4). Stage 1; the matcher's fallback after.
-│   │   ├── delay.go                  Delay derivation and the on-time classification.
-│   │   ├── matcher_test.go
-│   │   └── unmatched_test.go
+│   │   ├── schedule.go               In-memory timetable; calendar logic (RunsOn).
+│   │   ├── matcher.go                RawUpdate → Observation: orders 1–4, service date, delay derivation, atomic swap.
+│   │   └── matcher_test.go
 │   ├── ingest/
 │   │   ├── observation.go            The Observation type and its key.
 │   │   ├── filter.go                 Change filter (5).
@@ -941,18 +941,23 @@ func CandidateServiceDates(t time.Time, overlap time.Duration) []time.Time
 type Schedule struct {
     VersionID int64
     FeedID    string
-    // populated read-only at construction; never mutated after publish
+    // built by gtfsstatic with NewSchedule/AddTrip/AddStopTime/AddCalendar/
+    // AddCalendarDate, then never mutated after Swap publishes it
 }
 
-func (s *Schedule) Trip(tripID string) (Trip, bool)
-func (s *Schedule) StopTime(tripID string, seq uint32) (StopTime, bool)
-func (s *Schedule) StopTimeByStopID(tripID, stopID string) (StopTime, bool)
+func (s *Schedule) Trip(tripID string) (*Trip, bool)   // Trip.Stops in stop_sequence order
 func (s *Schedule) RunsOn(serviceID string, d time.Time) bool
+func (s *Schedule) ActiveShare(d time.Time) float64      // §9.1 case 17
 
-type Matcher struct{ /* holds atomic.Pointer[Schedule] per feed */ }
+type Matcher struct{ /* one atomic.Pointer[Schedule] per feed, fixed at construction */ }
 
-func (m *Matcher) Swap(feedID string, s *Schedule)
-func (m *Matcher) Match(u gtfsrt.RawUpdate) (Observation, error)
+func NewMatcher(feedIDs []string, o Options) *Matcher
+func (m *Matcher) Swap(s *Schedule)
+func (m *Matcher) Loaded(feedID string) int64
+// Match resolves one poll at a time and returns the counts behind
+// headway_unmatched_total and the match rate. It has no error: every update
+// becomes an observation, a counted skip, or several synthesised rows.
+func (m *Matcher) Match(feedID string, updates []gtfsrt.RawUpdate) ([]ingest.Observation, Counts)
 ```
 
 ```go
@@ -998,7 +1003,7 @@ func (w *Writer) Run(ctx context.Context) error
 // internal/store — every method takes a context and never retries internally.
 func (s *Store) InsertObservations(ctx context.Context, obs []Observation) (inserted int64, err error)
 func (s *Store) ActiveScheduleVersion(ctx context.Context, feedID string) (int64, error)
-func (s *Store) LoadSchedule(ctx context.Context, versionID int64) (*match.Schedule, error)
+// LoadSchedule is gtfsstatic's Loader.Schedule(ctx, feedID): store cannot import match (ingest imports store).
 func (s *Store) EnsurePartitions(ctx context.Context, from, to time.Time) ([]string, error)
 func (s *Store) DropPartitionsBefore(ctx context.Context, d time.Time) ([]string, error)
 func (s *Store) RollupHour(ctx context.Context, from, to time.Time, t Thresholds) (RollupResult, error)
@@ -1175,7 +1180,7 @@ There is a second, related trap: the generated bindings in `github.com/MobilityD
 14. The same trip appears twice in one feed message (duplicate entity) → the last one wins within a message; the primary key makes a second write a no-op anyway.
 15. Schedule swap happens mid-batch → observations in the batch may have been matched against different versions. Acceptable: `version_id` is not stored on observations. Documented as a deliberate loss of provenance. [DECIDED — revisit if a "why did the match rate change" investigation ever needs it.]
 16. Bundle download succeeds but the zip is truncated or a required file is missing → the load aborts, the old version stays active, an ERROR is logged, and the next scheduled refresh retries. The service keeps running on stale schedule data rather than stopping.
-17. A bundle whose `calendar.txt` no longer covers today → `RunsOn` returns false for every service; the match still works by `trip_id`, only the "should this be running" derivation is affected. Log a WARN at load time if fewer than 50 % of services are active on the load date.
+17. A bundle whose `calendar.txt` no longer covers today → `RunsOn` returns false for every service; the match still works by `trip_id`, only the "should this be running" derivation is affected. Log a WARN at load time if **no** service is active on the load date. (Superseded: "fewer than 50 %". TfNSW defines one service per weekday pattern, so a normal Wednesday has 14.7 % active — measured 2026-09-23 — and the 50 % rule warned every day. §15.)
 
 ### 9.2 Service days, times past 24:00, and daylight saving
 
@@ -1486,13 +1491,13 @@ Each stage ends in something that runs and can be demonstrated. **Stage 2 is the
 - [x] `internal/servicetime` with full DST test coverage. Do this before the matcher. Done in Stage 1, since no observation can be stored without a service date: 40 tests and subtests, 96.7 % covered, both transitions as fixtures.
 - [x] `internal/gtfsstatic`: download, hash, unzip, parse, insert, activate; version retention. Real bundle: 11.3 MB → 68,738 trips, 1,244,526 stop times in 19.9 s (22.4 s with the download); 212 MB in Postgres per version; peak RSS 54 MB, because stop_times streams from the zip into `COPY`.
 - [x] `migrations/0001` static tables populated; `schedule_versions` partial unique index verified by a test that tries to double-activate.
-- [ ] `internal/match`: schedule cache with atomic swap; resolution orders 1–4; delay derivation per §9.4's reconcile rule.
+- [x] `internal/match`: schedule cache with atomic swap; resolution orders 1–4; delay derivation per §9.4's reconcile rule. 94.7 % covered. The whole bundle in memory costs ~115 MB RSS (31 MB → 146 MB, measured live).
 - [ ] Every §9.1 edge case has a named subtest and passes.
 - [ ] `migrations/0003`: rollup tables; `internal/rollup` hourly job with the retention guard.
 - [ ] `/v1/stops/{id}/history` and `/v1/lines/{id}/history`.
 - [ ] `/v1/lines`, `/v1/stops/{id}/now`, `/v1/admin/stats`.
 - [ ] `.github/workflows/ci.yml` complete including the Postgres service container and the amd64 cross-compile.
-- [ ] Match rate measured and recorded. If below 90 %, fix before moving on.
+- [x] Match rate measured and recorded. If below 90 %, fix before moving on. **99.67 %** live on 2026-09-23 (≈2,700 full matches, 7 trip-only, 9 unknown trips per poll; 10 ADDED excluded).
 - [ ] README: architecture diagram, the numbers from §13, how to run it.
 - **Demo:** "here is how often the T1 was late at Strathfield last week, by hour."
 
@@ -1539,7 +1544,7 @@ These are the numbers that go in the README and on the resume. Anything marked "
 | Storage per day, rollups only | Size delta of `otp_*_hourly` per day | baseline TBD |
 | Storage reduction from rollups | `1 − (rollup bytes / raw bytes)` for the same day | baseline TBD; report honestly |
 | Total database size at steady state | `pg_database_size('headway')` after `RETENTION_DAYS` have elapsed | ≤ 10 GB |
-| Match rate | `headway_match_rate`, trains feed, excluding `ADDED` | ≥ 0.90 |
+| Match rate | `headway_match_rate`, trains feed, excluding `ADDED` | ≥ 0.90. **Measured 2026-09-23: 0.9967** over four consecutive live polls, from the matcher's own counts (the metric itself is Stage 4). |
 | Upstream requests per day | `increase(headway_feed_requests_total[24h])` | ≤ `FEED_DAILY_BUDGET` |
 | Test count and coverage | `go test ./... -coverprofile` total | baseline TBD; report the number, not a grade |
 | Uptime | `time() - process_start_time_seconds`, plus a note of the longest unbroken run | ≥ 7 days for the Definition of Done |
@@ -1727,6 +1732,9 @@ Append-only. To reverse a decision, add a row that names the one it supersedes.
 | 2026-09-23 | Compose layout: the service reads `../.env` (so `/opt/headway/.env` when the repository is cloned to `/opt/headway`), and Compose overrides its `DATABASE_URL` with one built from a new `POSTGRES_PASSWORD` variable. The service has no container healthcheck; Postgres does. `stop_grace_period: 45s`; container logs rotate at 3 × 10 MB. The Dockerfile cross-compiles on `$BUILDPLATFORM` to `$TARGETARCH`. | One `.env` serves `make run` (localhost URL) and Compose (service-name URL) without two copies of the password. Distroless has no shell or HTTP client to run a healthcheck, and Compose does not restart unhealthy containers, so it would only decorate `ps`. Shutdown can take two `HTTP_SHUTDOWN_GRACE` periods and Docker's 10 s default would SIGKILL mid-flush. A 20 GB disk cannot afford unrotated logs. Cross-compiling avoids emulating the Go toolchain on an arm64 laptop. | A `-healthcheck` subcommand in the binary (code for a check nothing acts on); a hard-coded Compose password (the repository is public); a separate `.env.compose`; building under QEMU. |
 | 2026-09-23 | A schedule bundle loads in one transaction (version row plus every table via streamed `COPY`), then activates in a second. A failed load leaves nothing. Identical content, by SHA-256 of the zip, is a no-op; content identical to an older version reactivates that version. An empty timetable is refused. Only routes, stops, trips, stop_times, calendar and calendar_dates are loaded. | One transaction means no orphan versions to clean up (§9.4 case 5 becomes impossible rather than handled) and the active version is never disturbed by a bad bundle. Streaming keeps peak RSS at 54 MB for a 114 MB stop_times.txt. A zero-trip bundle parses cleanly and would make every update unmatchable. occupancies.txt alone is 48 MB of data nothing reads. | Loading rows under an inactive version outside a transaction and deleting orphans later (the §9.4 wording); parsing the whole bundle into memory first; hashing per-file contents instead of the zip (would survive TfNSW's timestamp-only rebuilds, but content changes daily anyway). |
 | 2026-09-23 | Schedules load at startup and then at the earlier of the next `SCHEDULE_REFRESH_AT` in Sydney and now + `SCHEDULE_REFRESH_INTERVAL`; a failed load retries after 15 minutes. The loader has its own HTTP client with a 5-minute timeout and shares the account-wide limiter. | `time.Date` keeps 03:30 on the wall clock across DST; the interval still bounds the gap if someone sets it below a day. Waiting a day after a failure leaves the matcher on a stale timetable for a day. The realtime client's 20 s timeout is wrong for an 11 MB download; the quota is per account either way. | A fixed 24 h ticker (drifts an hour at each DST change); retrying at the poll interval (spends quota re-downloading into the same failure). |
+| 2026-09-23 | The matcher takes a whole poll (`Match(feedID, updates)`) and returns observations plus `Counts`, replacing §7.3's per-update `Match(u) (Observation, error)`. It also replaces `match.Unmatched`: with no schedule loaded, every update takes order 4, which is the same thing. `Matched` means the trip was found (orders 1–3). The producer's `delay` always wins; `time − scheduled` only fills a missing delay, and disagreement beyond `DELAY_RECONCILE_TOLERANCE_S` is counted. The service date is the first candidate on which the trip's service runs and whose scheduled time is within `SERVICE_DATE_TOLERANCE` of the update's predicted time (else header time). | A cancelled trip turns one update into many rows, so one update in, one out does not fit; a poll-sized call also gives the counts the metrics need without shared state. There are no errors to return: every update is kept, skipped with a count, or expanded. The feed never sends `start_date` (0 of 2,912 updates), so the calendar and the stop time are all there is to decide between two candidate dates. | A per-update API with a separate counter object; `time` winning when present (it is relative to our timetable version, `delay` to the producer's); ignoring the calendar and using time alone (a weekday-only trip would be put on Saturday). |
+| 2026-09-23 | The schedule read-back lives in `gtfsstatic` (`Loader.Schedule`), not `store.LoadSchedule` as §7.3 had it, and the refresh loop publishes the active version to the matcher after every attempt, including a failed download. The whole bundle is held in memory. | `ingest` imports `store` and `match` imports `ingest`, so `store` importing `match` is a cycle; the loader already owns the timetable tables' SQL. On 2026-09-23 the schedule endpoint answered 502 at startup and the matcher stayed empty despite an active version in Postgres — a regression test now covers it. Holding every trip costs ~115 MB, measured; filtering to candidate dates would need re-filtering at midnight, and 146 MB total leaves room beside Postgres on 1 GB. | A new package just for the schedule types; publishing only after a successful download; filtering trips by calendar at build time (revisit if the VM runs short of memory). |
+| 2026-09-23 | §9.1 case 17's warning fires when **no** service runs on the load date, superseding "fewer than 50 %". | TfNSW defines one service per weekday pattern: on Wednesday 2026-09-23 only 14.7 % of the bundle's services ran, so the 50 % rule warned every day on a healthy bundle. Zero is the actual signature of a calendar that no longer covers today. | A lower fraction (still a guess about the producer's service structure). |
 
 ---
 

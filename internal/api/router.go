@@ -18,6 +18,7 @@ import (
 type Options struct {
 	Cache           *cache.Cache
 	Ping            func(context.Context) error
+	ScheduleLoaded  func() bool // true once any feed's timetable is in the matcher
 	OnTime          config.Thresholds
 	ReadyMaxFeedAge time.Duration
 	Now             func() time.Time

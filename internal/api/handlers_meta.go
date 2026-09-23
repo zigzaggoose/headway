@@ -13,10 +13,14 @@ func (s *server) healthz(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
-// readyz checks the database and feed freshness. §7.1 also requires an
-// active schedule, which does not exist until Stage 2; that check joins then.
+// readyz checks the three things §7.1 names: a timetable in the matcher, the
+// database, and feed freshness.
 func (s *server) readyz(w http.ResponseWriter, r *http.Request) {
 	var reasons []string
+
+	if !s.ScheduleLoaded() {
+		reasons = append(reasons, "no schedule version is loaded")
+	}
 
 	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
 	defer cancel()

@@ -23,6 +23,7 @@ import (
 	"github.com/zigzaggoose/headway"
 	"github.com/zigzaggoose/headway/internal/config"
 	"github.com/zigzaggoose/headway/internal/feed"
+	"github.com/zigzaggoose/headway/internal/match"
 	"github.com/zigzaggoose/headway/internal/store"
 )
 
@@ -76,6 +77,7 @@ type upstream struct {
 	honour304    bool
 	requests     int
 	gotIMS       string
+	fail         bool // answer 502, as the real endpoint did on 2026-09-23
 }
 
 func (u *upstream) set(body []byte, lm time.Time) {
@@ -89,6 +91,10 @@ func (u *upstream) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer u.mu.Unlock()
 	u.requests++
 	u.gotIMS = r.Header.Get("If-Modified-Since")
+	if u.fail {
+		w.WriteHeader(http.StatusBadGateway)
+		return
+	}
 	if u.honour304 && u.gotIMS == u.lastModified.Format(http.TimeFormat) {
 		w.WriteHeader(http.StatusNotModified)
 		return
@@ -98,10 +104,11 @@ func (u *upstream) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 type harness struct {
-	pool   *pgxpool.Pool
-	up     *upstream
-	loader *Loader
-	feed   config.Feed
+	matcher *match.Matcher
+	pool    *pgxpool.Pool
+	up      *upstream
+	loader  *Loader
+	feed    config.Feed
 }
 
 func newHarness(t *testing.T, keep int) *harness {
@@ -111,8 +118,9 @@ func newHarness(t *testing.T, keep int) *harness {
 	srv := httptest.NewServer(up)
 	t.Cleanup(srv.Close)
 	return &harness{
-		pool: pool,
-		up:   up,
+		matcher: match.NewMatcher([]string{"sydneytrains"}, match.Options{DayOverlap: 6 * time.Hour, DateTolerance: 6 * time.Hour}),
+		pool:    pool,
+		up:      up,
 		loader: NewLoader(pool, feed.NewClient("k", 10*time.Second, time.Now), feed.NewLimiter(100, 1000, time.Now),
 			48*3600, keep, time.Now, slog.New(slog.DiscardHandler)),
 		feed: config.Feed{ID: "sydneytrains", ScheduleURL: srv.URL},
@@ -401,13 +409,13 @@ func TestRun_LoadsAtStartupAndStopsOnCancel(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		h.loader.Run(ctx, []config.Feed{h.feed, {ID: "no-schedule"}}, Refresh{Hour: 3, Minute: 30, Interval: 24 * time.Hour})
+		h.loader.Run(ctx, []config.Feed{h.feed, {ID: "no-schedule"}}, Refresh{Hour: 3, Minute: 30, Interval: 24 * time.Hour}, h.matcher)
 	}()
 
 	deadline := time.Now().Add(10 * time.Second)
-	for len(h.active(t)) == 0 {
+	for h.matcher.Loaded(h.feed.ID) == 0 {
 		if time.Now().After(deadline) {
-			t.Fatal("no version activated within 10s")
+			t.Fatal("no version reached the matcher within 10s")
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
@@ -416,5 +424,75 @@ func TestRun_LoadsAtStartupAndStopsOnCancel(t *testing.T) {
 	case <-done:
 	case <-time.After(2 * time.Second):
 		t.Fatal("Run did not return after cancel")
+	}
+}
+
+// The read-back is what the matcher trusts, so it must round-trip the
+// details that matter: call order, times past midnight, blank times, and
+// which days a service runs.
+func TestSchedule_ReadBack_RoundTripsTheActiveVersion(t *testing.T) {
+	h := newHarness(t, 3)
+	b := bundle(t, map[string]string{
+		"routes.txt":         "route_id,route_type\nAPS_1a,2\n",
+		"stops.txt":          "stop_id,stop_name\nA,Alpha\nB,Beta\n",
+		"trips.txt":          "route_id,service_id,trip_id,direction_id,trip_headsign\nAPS_1a,SVC,T-1,1,Macarthur\n",
+		"stop_times.txt":     "trip_id,arrival_time,departure_time,stop_id,stop_sequence\nT-1,25:10:00,25:11:00,B,20\nT-1,,,A,3\n",
+		"calendar.txt":       "service_id,monday,tuesday,wednesday,thursday,friday,saturday,sunday,start_date,end_date\nSVC,0,0,1,0,0,0,0,20260921,20261231\n",
+		"calendar_dates.txt": "service_id,date,exception_type\nSVC,20260930,2\n",
+	})
+	h.up.set(b, lm1)
+	id, _ := h.load(t)
+
+	s, err := h.loader.Schedule(context.Background(), h.feed.ID)
+	if err != nil {
+		t.Fatalf("schedule: %v", err)
+	}
+	trip, ok := s.Trip("T-1")
+	if s.VersionID != id || !ok {
+		t.Fatalf("version %d, trip found %v", s.VersionID, ok)
+	}
+	if trip.RouteID != "APS_1a" || *trip.DirectionID != 1 || trip.Headsign != "Macarthur" || len(trip.Stops) != 2 {
+		t.Fatalf("trip = %+v", trip)
+	}
+	if first := trip.Stops[0]; first.Seq != 3 || first.ArrS != match.NoTime || first.DepS != match.NoTime {
+		t.Errorf("first call = %+v, want seq 3 with blank times: calls must come back in stop_sequence order", first)
+	}
+	if second := trip.Stops[1]; second.Seq != 20 || second.ArrS != 90600 || second.DepS != 90660 {
+		t.Errorf("second call = %+v", second)
+	}
+	wed := time.Date(2026, 9, 23, 0, 0, 0, 0, time.UTC)
+	if !s.RunsOn("SVC", wed) || s.RunsOn("SVC", wed.AddDate(0, 0, 1)) || s.RunsOn("SVC", wed.AddDate(0, 0, 7)) {
+		t.Error("RunsOn: want Wednesday 23rd yes, Thursday no, Wednesday 30th (removed) no")
+	}
+
+	if _, err := h.loader.Schedule(context.Background(), "other"); !errors.Is(err, ErrNoActiveSchedule) {
+		t.Errorf("a feed with no version: err = %v, want ErrNoActiveSchedule", err)
+	}
+}
+
+// Regression: on 2026-09-23 the schedule endpoint answered 502 at startup and
+// the matcher stayed empty all run, although Postgres held an active version.
+func TestRun_DownloadFailsAtStartup_PublishesTheVersionAlreadyActive(t *testing.T) {
+	h := newHarness(t, 3)
+	h.up.set(gtfs(t, "a"), lm1)
+	id, _ := h.load(t)
+	h.up.mu.Lock()
+	h.up.fail = true
+	h.up.mu.Unlock()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		h.loader.Run(ctx, []config.Feed{h.feed}, Refresh{Hour: 3, Minute: 30, Interval: 24 * time.Hour}, h.matcher)
+	}()
+	defer func() { cancel(); <-done }()
+
+	deadline := time.Now().Add(10 * time.Second)
+	for h.matcher.Loaded(h.feed.ID) != id {
+		if time.Now().After(deadline) {
+			t.Fatalf("matcher has version %d after a failed download, want the active %d", h.matcher.Loaded(h.feed.ID), id)
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 }

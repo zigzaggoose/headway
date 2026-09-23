@@ -105,6 +105,11 @@ func main() {
 	}, log)
 	pipeline.Start()
 	latest := cache.New(cfg.HTTP.CacheTTL, time.Now)
+	matcher := match.NewMatcher(feedIDs(cfg), match.Options{
+		DayOverlap:    cfg.Service.DayOverlap,
+		DateTolerance: cfg.Service.DateTolerance,
+		ReconcileS:    int32(cfg.Ingest.DelayReconcileToleranceS),
+	})
 
 	// Shutdown is ordered and the order matters (§9.4): cancel the pollers,
 	// drain HTTP, wait for every producer to return, and only then close what
@@ -114,8 +119,16 @@ func main() {
 
 	srv := &http.Server{
 		Handler: api.NewHandler(api.Options{
-			Cache:           latest,
-			Ping:            db.Ping,
+			Cache: latest,
+			Ping:  db.Ping,
+			ScheduleLoaded: func() bool {
+				for _, f := range cfg.Feeds {
+					if matcher.Loaded(f.ID) != 0 {
+						return true
+					}
+				}
+				return false
+			},
 			OnTime:          cfg.OnTime,
 			ReadyMaxFeedAge: cfg.HTTP.ReadyMaxFeedAge,
 			Now:             time.Now,
@@ -153,12 +166,12 @@ func main() {
 		defer loader.Done()
 		schedules.Run(ctx, cfg.Feeds, gtfsstatic.Refresh{
 			Hour: cfg.Schedule.RefreshHour, Minute: cfg.Schedule.RefreshMinute, Interval: cfg.Schedule.RefreshInterval,
-		})
+		}, matcher)
 	}()
 
 	var pollers sync.WaitGroup
 	for _, f := range cfg.Feeds {
-		p := feed.NewPoller(f, client, limiter, decodeAndIngest(log, pipeline, latest, cfg.Service.DayOverlap), feed.PollerOptions{
+		p := feed.NewPoller(f, client, limiter, decodeAndIngest(log, matcher, pipeline, latest), feed.PollerOptions{
 			Interval: cfg.Poll.Interval,
 			Jitter:   cfg.Poll.Jitter,
 			Now:      time.Now,
@@ -213,7 +226,7 @@ func main() {
 // the pipeline. The cache takes every observation, before the change filter,
 // because "unchanged since the last write" still means "current". It reports at
 // debug because a line per poll is far above the rate §10.2 allows for info.
-func decodeAndIngest(log *slog.Logger, pipeline *ingest.Pipeline, latest *cache.Cache, overlap time.Duration) feed.Handler {
+func decodeAndIngest(log *slog.Logger, matcher *match.Matcher, pipeline *ingest.Pipeline, latest *cache.Cache) feed.Handler {
 	return func(_ context.Context, r feed.Response) {
 		decoded, err := gtfsrt.Decode(r.FeedID, r.Body, r.FetchedAt)
 		if err != nil {
@@ -222,7 +235,7 @@ func decodeAndIngest(log *slog.Logger, pipeline *ingest.Pipeline, latest *cache.
 			log.Error("decode failed", "component", "gtfsrt", "feed_id", r.FeedID, "err", err.Error())
 			return
 		}
-		obs, skipped := match.Unmatched(decoded.Updates, overlap)
+		obs, counts := matcher.Match(r.FeedID, decoded.Updates)
 		latest.Update(r.FeedID, decoded.HeaderTS, obs)
 		queued := 0
 		for _, o := range obs {
@@ -241,9 +254,15 @@ func decodeAndIngest(log *slog.Logger, pipeline *ingest.Pipeline, latest *cache.
 			"header_ts_missing", decoded.HeaderTSMissing,
 			"observations", len(obs),
 			"queued", queued,
-			"skipped_trip_level", skipped.TripLevel,
-			"skipped_no_stop_id", skipped.NoStopID,
-			"skipped_bad_start_date", skipped.BadStartDate,
+			"match_rate", counts.MatchRate(),
+			"full_match", counts.FullMatch,
+			"trip_only", counts.TripOnly,
+			"unknown_trip", counts.UnknownTrip,
+			"added", counts.Added,
+			"no_schedule", counts.NoSchedule,
+			"cancelled_stops", counts.CancelledStops,
+			"skipped_trip_level", counts.TripLevelSkipped,
+			"delay_disagreements", counts.DelayDisagreements,
 		)
 	}
 }

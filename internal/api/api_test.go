@@ -54,6 +54,7 @@ func newHarness(t *testing.T, ping error, feeds ...[]ingest.Observation) harness
 		h: NewHandler(Options{
 			Cache:           c,
 			Ping:            func(context.Context) error { return ping },
+			ScheduleLoaded:  func() bool { return true },
 			OnTime:          thresholds,
 			ReadyMaxFeedAge: 120 * time.Second,
 			Now:             func() time.Time { return now },
@@ -136,11 +137,25 @@ func TestReadyz_EachDependency_DecidesReadiness(t *testing.T) {
 	}
 }
 
+func TestReadyz_NoSchedule_IsNotReady(t *testing.T) {
+	c := cache.New(45*time.Minute, func() time.Time { return now })
+	c.Update("trains", now, nil)
+	h := harness{h: NewHandler(Options{
+		Cache: c, Ping: func(context.Context) error { return nil }, ScheduleLoaded: func() bool { return false },
+		ReadyMaxFeedAge: 120 * time.Second, Now: func() time.Time { return now }, Log: slog.New(slog.DiscardHandler),
+	})}
+	rec, body := h.get(t, "/readyz")
+	assertEnvelope(t, rec, body, 503, "not_ready")
+	if r := body["reasons"].([]any); len(r) != 1 || r[0] != "no schedule version is loaded" {
+		t.Errorf("reasons = %v", r)
+	}
+}
+
 func TestReadyz_StaleFeed_IsNotReady(t *testing.T) {
 	c := cache.New(45*time.Minute, func() time.Time { return now })
 	c.Update("trains", now.Add(-121*time.Second), nil)
 	h := harness{h: NewHandler(Options{
-		Cache: c, Ping: func(context.Context) error { return nil }, OnTime: thresholds,
+		Cache: c, Ping: func(context.Context) error { return nil }, ScheduleLoaded: func() bool { return true }, OnTime: thresholds,
 		ReadyMaxFeedAge: 120 * time.Second, Now: func() time.Time { return now }, Log: slog.New(slog.DiscardHandler),
 	})}
 	rec, body := h.get(t, "/readyz")
