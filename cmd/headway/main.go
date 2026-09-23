@@ -25,6 +25,8 @@ import (
 	"github.com/zigzaggoose/headway/internal/config"
 	"github.com/zigzaggoose/headway/internal/feed"
 	"github.com/zigzaggoose/headway/internal/gtfsrt"
+	"github.com/zigzaggoose/headway/internal/ingest"
+	"github.com/zigzaggoose/headway/internal/match"
 	"github.com/zigzaggoose/headway/internal/store"
 )
 
@@ -79,9 +81,18 @@ func main() {
 		return
 	}
 
+	pipeline := ingest.NewPipeline(db.Pool(), ingest.PipelineConfig{
+		QueueSize:        cfg.Ingest.QueueSize,
+		BatchSize:        cfg.Ingest.BatchSize,
+		FlushInterval:    cfg.Ingest.FlushInterval,
+		FilterMinDeltaS:  int32(cfg.Ingest.FilterMinDeltaS),
+		FilterMaxEntries: cfg.Ingest.FilterMaxEntries,
+	}, log)
+	pipeline.Start()
+
 	// Shutdown is ordered and the order matters (§9.4): cancel the pollers,
 	// then wait for every producer to return, and only then close what they
-	// write into. The steps between arrive with the writer.
+	// write into. Draining HTTP (step 2) arrives with internal/api.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -92,7 +103,7 @@ func main() {
 
 	var pollers sync.WaitGroup
 	for _, f := range cfg.Feeds {
-		p := feed.NewPoller(f, client, limiter, decodeAndIngest(log), feed.PollerOptions{
+		p := feed.NewPoller(f, client, limiter, decodeAndIngest(log, pipeline, cfg.Service.DayOverlap), feed.PollerOptions{
 			Interval: cfg.Poll.Interval,
 			Jitter:   cfg.Poll.Jitter,
 			Now:      time.Now,
@@ -112,15 +123,27 @@ func main() {
 
 	log.Info("shutdown started", "component", "main")
 	pollers.Wait() // step 3: no new observations can be produced
-	db.Close()     // step 6: after every producer has stopped, never before
-	log.Info("shutdown complete", "component", "main", "requests_today", limiter.Used())
+	// Steps 4 and 5: close the channel and let the writer flush. The grace
+	// is the HTTP one because config already requires it to exceed a flush.
+	if err := pipeline.Close(cfg.HTTP.ShutdownGrace); err != nil {
+		log.Error("writer did not drain", "component", "main", "err", err.Error())
+	}
+	db.Close() // step 6: after the writer has finished, never before
+
+	st := pipeline.Stats()
+	log.Info("shutdown complete",
+		"component", "main",
+		"requests_today", limiter.Used(),
+		"rows_written", st.Written,
+		"rows_failed", st.Failed,
+		"dropped", st.Dropped,
+	)
 }
 
-// decodeAndIngest decodes on the poller's goroutine (§9.4). internal/match and
-// the ingest pipeline hang off the decoded updates from Stage 2; until then
-// the handler reports what it decoded, at debug, because a line per poll is far
-// above the rate §10.2 allows for info.
-func decodeAndIngest(log *slog.Logger) feed.Handler {
+// decodeAndIngest decodes and converts on the poller's goroutine (§9.4), then
+// hands each observation to the pipeline, which never blocks. It reports at
+// debug because a line per poll is far above the rate §10.2 allows for info.
+func decodeAndIngest(log *slog.Logger, pipeline *ingest.Pipeline, overlap time.Duration) feed.Handler {
 	return func(_ context.Context, r feed.Response) {
 		decoded, err := gtfsrt.Decode(r.FeedID, r.Body, r.FetchedAt)
 		if err != nil {
@@ -129,7 +152,14 @@ func decodeAndIngest(log *slog.Logger) feed.Handler {
 			log.Error("decode failed", "component", "gtfsrt", "feed_id", r.FeedID, "err", err.Error())
 			return
 		}
-		log.Debug("feed decoded",
+		obs, skipped := match.Unmatched(decoded.Updates, overlap)
+		queued := 0
+		for _, o := range obs {
+			if pipeline.Submit(o) {
+				queued++
+			}
+		}
+		log.Debug("feed ingested",
 			"component", "gtfsrt",
 			"feed_id", r.FeedID,
 			"bytes", len(r.Body),
@@ -138,6 +168,11 @@ func decodeAndIngest(log *slog.Logger) feed.Handler {
 			"dropped", decoded.TotalDropped(),
 			"feed_age_s", decoded.Age().Seconds(),
 			"header_ts_missing", decoded.HeaderTSMissing,
+			"observations", len(obs),
+			"queued", queued,
+			"skipped_trip_level", skipped.TripLevel,
+			"skipped_no_stop_id", skipped.NoStopID,
+			"skipped_bad_start_date", skipped.BadStartDate,
 		)
 	}
 }

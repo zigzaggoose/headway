@@ -19,25 +19,26 @@ set — it is in `.env`, which `make` sources but a bare `go test` does not.
 
 **Stage 1 (MVP), 9 of 15 items done.** Nothing is deployed. No HTTP server exists yet.
 
-Working end to end today: the service starts, applies migrations, polls the live
-TfNSW feed every 15 s, decodes ~3,900 updates per poll, and shuts down cleanly.
-Verified against the live API, not just in tests.
+Working end to end today (2026-09-23): the service starts, applies migrations, polls
+the live TfNSW feed every 15 s, decodes ~3,250 updates per poll, converts them with
+`match.Unmatched`, and writes rows through the change filter and batch writer. A 50 s
+live run wrote 3,887 rows from 4 polls, 0 failed, 0 dropped, and flushed the final
+batch on SIGINT. Trip-level updates (~150 per poll) are skipped until the matcher
+can expand them.
 
-**Not yet connected:** the ingest pipeline. `internal/ingest` is complete and tested,
-but `main` does not use it — the handler in `cmd/headway/main.go` decodes and logs a
-count, and stops there. `internal/servicetime` now exists (2026-09-23), so an
-`Observation` can get its `ServiceDate`.
+Observed on that run and not yet explained: `observed_delay_s` ranged 0 to 5,482 —
+no negative (early) value at all across 3,887 rows. Check at Stage 2 whether TfNSW
+clamps early running to zero, because that would bias every on-time percentage.
 
 ## Do this next
 
-**Wire the pipeline into `main`**: decode → observation → `pipeline.Submit`. The
-service date is `start_date` when the producer sends it, else the first of
-`servicetime.CandidateServiceDates(headerTS, cfg.Service.DayOverlap)`. Without a
-matcher there is no schedule to disambiguate the two candidates, so the first one is
-a known approximation until Stage 2. `servicetime` is done: note that on DST days the
-service day starts at 23:00 or 01:00, not midnight (§15, 2026-09-23).
+**`internal/cache`** — the latest-state cache behind `/v1/lines/{id}/now`.
 
-Then Stage 1's remaining items: `internal/cache`, `internal/api` (`/v1/lines/{id}/now`,
+The BinaryLane VM is deferred by the user's choice (2026-09-23) — not paying yet.
+Rows are being written locally, but nothing captures while the laptop is off, and
+that history is not recoverable. Raise it again when `deploy/` is ready.
+
+Then Stage 1's remaining items: `internal/api` (`/v1/lines/{id}/now`,
 `/healthz`, `/readyz`), the full §9.4 shutdown order, `deploy/`, the VM.
 
 ## Completed this session
