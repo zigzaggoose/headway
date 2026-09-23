@@ -183,6 +183,7 @@ func (m *Matcher) Match(feedID string, updates []gtfsrt.RawUpdate) ([]ingest.Obs
 				o := base(u, d)
 				o.StopID = st.StopID
 				o.StopSequence = seqOf(st)
+				o.ScheduledAt = scheduledAt(d, st)
 				o.ArrivalDelayS, o.DepartureDelayS, o.ObservedDelayS = nil, nil, nil
 				matched(&o, trip)
 				add(o)
@@ -216,6 +217,7 @@ func (m *Matcher) Match(feedID string, updates []gtfsrt.RawUpdate) ([]ingest.Obs
 		o := base(u, d)
 		o.StopID = st.StopID
 		o.StopSequence = seqOf(st)
+		o.ScheduledAt = scheduledAt(d, st)
 		matched(&o, trip)
 		var dis1, dis2 bool
 		o.ArrivalDelayS, dis1 = m.derive(u.ArrivalDelay, u.ArrivalTime, d, st.ArrS)
@@ -409,6 +411,20 @@ func matched(o *ingest.Observation, t *Trip) {
 	if t.DirectionID != nil {
 		o.DirectionID = t.DirectionID
 	}
+}
+
+// scheduledAt is when the timetable has the visit on service date d: the
+// departure, else the arrival, else nil for a stop the timetable leaves blank.
+func scheduledAt(d time.Time, st *StopTime) *time.Time {
+	s := st.DepS
+	if s == NoTime {
+		s = st.ArrS
+	}
+	if s == NoTime {
+		return nil
+	}
+	t := servicetime.AtServiceOffset(d, int(s))
+	return &t
 }
 
 // seqOf copies the sequence out, so no observation points into a schedule

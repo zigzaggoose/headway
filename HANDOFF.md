@@ -32,17 +32,14 @@ measured numbers.
 
 ## Do this next
 
-1. **Answer §16 q12 with the user** — which hour a stop visit belongs to in the
-   rollup. TfNSW keeps cancelled and replacement trips in the feed for hours
-   after their time, so bucketing by the last observation's `feed_ts` puts this
-   morning's cancellations in tonight's buckets. The proposal is a `scheduled_at`
-   column and bucketing by it. It changes what history means, so it is the user's
-   call, and it is better decided before the VM starts collecting for real.
+1. **Stage 3** (§12): more feeds, the load test, storage measurements — in progress.
+   §16 q12 is answered and built (2026-09-23): rollups bucket by `scheduled_at`
+   and roll each hour up three hours after it ends, so `/history` runs up to four
+   hours behind.
 2. **Deploy** when the user is ready to pay: BinaryLane Standard 1 GB, Sydney,
    Ubuntu 24.04. Clone to `/opt/headway`, put `.env` there with
    `POSTGRES_PASSWORD`, `make up`. Write `deploy/vm-bootstrap.md` from what is
    actually run. Stage 1's last two boxes close there.
-3. **Stage 3** (§12): more feeds, the load test, storage measurements.
 
 ## Found in the post-Stage-2 end-to-end test (2026-09-23)
 

@@ -75,7 +75,7 @@ func newHarness(t *testing.T, now time.Time) *harness {
 	h := &harness{pool: testPool(t), now: now}
 	h.job = New(h.pool, Options{
 		OnTime:        config.Thresholds{EarlyS: -60, LateS: 300, VeryLateS: 900},
-		RetentionDays: 7, LookaheadDays: 3, Interval: time.Hour, Lag: time.Hour,
+		RetentionDays: 7, LookaheadDays: 3, Interval: time.Hour, Settle: time.Hour,
 	}, func() time.Time { return h.now }, slog.New(slog.DiscardHandler))
 	return h
 }
@@ -87,6 +87,7 @@ type row struct {
 	delay       *int32
 	tripRel     int16
 	feedTS      time.Time
+	scheduledAt *time.Time // set on a matched visit; nil buckets by feedTS
 }
 
 func (h *harness) insert(t *testing.T, rows ...row) {
@@ -97,9 +98,9 @@ func (h *harness) insert(t *testing.T, rows ...row) {
 			route = &r.route
 		}
 		if _, err := h.pool.Exec(context.Background(), `
-			INSERT INTO observations (service_date, feed_id, trip_id, stop_id, feed_ts, route_id, observed_delay_s, trip_rel, stop_time_rel, matched)
-			VALUES ($1, 'sydneytrains', $2, $3, $4, $5, $6, $7, 0, true)`,
-			r.serviceDate, r.trip, r.stop, r.feedTS, route, r.delay, r.tripRel); err != nil {
+			INSERT INTO observations (service_date, feed_id, trip_id, stop_id, feed_ts, route_id, observed_delay_s, trip_rel, stop_time_rel, matched, scheduled_at)
+			VALUES ($1, 'sydneytrains', $2, $3, $4, $5, $6, $7, 0, $8, $9)`,
+			r.serviceDate, r.trip, r.stop, r.feedTS, route, r.delay, r.tripRel, r.scheduledAt != nil, r.scheduledAt); err != nil {
 			t.Fatalf("insert %+v: %v", r, err)
 		}
 	}
@@ -241,7 +242,7 @@ func TestRollup_TwoServiceDatesInOneBucket_AreOneRow(t *testing.T) {
 	}
 }
 
-func TestRollup_Lag_HoldsBackTheNewestHourUntilItSettles(t *testing.T) {
+func TestRollup_Settle_HoldsBackTheNewestHour(t *testing.T) {
 	h := newHarness(t, sydney(10, 10))
 	h.insert(t,
 		row{serviceDate: date(23), trip: "T1", stop: "A", route: "R", delay: d(0), feedTS: sydney(8, 10)},
@@ -328,5 +329,89 @@ func TestTick_RunsEveryStepAndExpiresTheFilter(t *testing.T) {
 	}
 	if !expired.Equal(date(22)) {
 		t.Errorf("filter expired before %s, want yesterday", expired.Format(time.DateOnly))
+	}
+}
+
+func sched(h, m int) *time.Time { t := sydney(h, m); return &t }
+
+// §16 q12, the reason for scheduled_at: TfNSW keeps a cancelled trip in the
+// feed all day, so its last observation can be many hours after its time.
+// The visit belongs to the hour it was scheduled, not the hour the feed last
+// mentioned it.
+func TestRollup_MatchedVisit_IsBucketedByItsScheduledHour(t *testing.T) {
+	h := newHarness(t, sydney(23, 30))
+	h.insert(t,
+		// A 03:49 cancellation, first seen at 03:00 and still reported at 22:50.
+		row{serviceDate: date(23), trip: "C", stop: "A", route: "R", tripRel: 3, feedTS: sydney(3, 0), scheduledAt: sched(3, 49)},
+		row{serviceDate: date(23), trip: "C", stop: "A", route: "R", tripRel: 3, feedTS: sydney(22, 50), scheduledAt: sched(3, 49)},
+		// A 09:00 visit predicted at 07:10 and last reported at 09:05, 300 s late.
+		row{serviceDate: date(23), trip: "P", stop: "A", route: "R", delay: d(60), feedTS: sydney(7, 10), scheduledAt: sched(9, 0)},
+		row{serviceDate: date(23), trip: "P", stop: "A", route: "R", delay: d(300), feedTS: sydney(9, 5), scheduledAt: sched(9, 0)},
+	)
+
+	h.rollup(t)
+
+	bucket := func(hour int) (n, cancelled, onTime int) {
+		t.Helper()
+		err := h.pool.QueryRow(context.Background(),
+			`SELECT coalesce(sum(n_obs), 0), coalesce(sum(n_cancelled), 0), coalesce(sum(n_on_time), 0) FROM otp_route_hourly WHERE bucket_start = $1`,
+			sydney(hour, 0)).Scan(&n, &cancelled, &onTime)
+		if err != nil {
+			t.Fatalf("read bucket: %v", err)
+		}
+		return
+	}
+	if n, c, _ := bucket(3); n != 1 || c != 1 {
+		t.Errorf("03:00: %d visits, %d cancelled; want the cancellation, once", n, c)
+	}
+	if n, _, _ := bucket(22); n != 0 {
+		t.Errorf("22:00 holds %d visits: a cancellation was counted when the feed last mentioned it", n)
+	}
+	if n, _, _ := bucket(7); n != 0 {
+		t.Errorf("07:00 holds %d visits: a prediction was counted in the hour it was made", n)
+	}
+	if n, _, on := bucket(9); n != 1 || on != 1 {
+		t.Errorf("09:00: %d visits, %d on time; want one visit at its final 300 s", n, on)
+	}
+}
+
+// Each hour is rolled up once. A word about a visit that arrives after its
+// hour has settled is not counted, and in particular not counted twice.
+func TestRollup_WordAfterSettling_IsNeverCountedTwice(t *testing.T) {
+	h := newHarness(t, sydney(10, 10)) // settle 1 h: hours up to 09:00 are due
+	h.insert(t, row{serviceDate: date(23), trip: "L", stop: "A", route: "R", delay: d(600), feedTS: sydney(8, 50), scheduledAt: sched(8, 30)})
+	h.rollup(t)
+
+	h.insert(t, row{serviceDate: date(23), trip: "L", stop: "A", route: "R", delay: d(1200), feedTS: sydney(10, 20), scheduledAt: sched(8, 30)})
+	h.now = sydney(14, 0)
+	h.rollup(t)
+
+	if n := h.count(t, `SELECT sum(n_obs) FROM otp_route_hourly`); n != 1 {
+		t.Errorf("%d visits rolled up, want exactly 1", n)
+	}
+	if n := h.count(t, `SELECT n_late FROM otp_route_hourly WHERE bucket_start = $1`, sydney(8, 0)); n != 1 {
+		t.Errorf("08:00 n_late = %d; want the 600 s value it had when the hour settled", n)
+	}
+}
+
+// Retention decides "rolled up yet" with the same expression the rollup
+// buckets on: a partition whose visits are scheduled past the watermark is
+// kept even if every row was written before it.
+func TestDropPartitionsBefore_UsesTheScheduledHour(t *testing.T) {
+	h := newHarness(t, sydney(12, 0))
+	ctx := context.Background()
+	if _, err := h.job.EnsurePartitions(ctx, date(10), date(10)); err != nil {
+		t.Fatalf("ensure: %v", err)
+	}
+	late := time.Date(2026, 9, 11, 1, 0, 0, 0, aest) // 25:00 on the 10th's service day
+	h.insert(t, row{serviceDate: date(10), trip: "T", stop: "A", route: "R", delay: d(0),
+		feedTS: time.Date(2026, 9, 10, 20, 0, 0, 0, aest), scheduledAt: &late})
+	if _, err := h.pool.Exec(ctx, `UPDATE rollup_state SET watermark = $1`, time.Date(2026, 9, 11, 0, 0, 0, 0, aest)); err != nil {
+		t.Fatalf("set watermark: %v", err)
+	}
+
+	dropped, err := h.job.DropPartitionsBefore(ctx, date(13))
+	if err != nil || len(dropped) != 0 {
+		t.Errorf("dropped %v (err %v); the 10th has a visit scheduled after the watermark", dropped, err)
 	}
 }

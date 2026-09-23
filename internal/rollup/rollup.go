@@ -21,16 +21,17 @@ type Result struct {
 // sentinel is the watermark migrations/0003 seeds: "never run".
 var sentinel = time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)
 
-// Rollup aggregates every completed hour since the watermark and advances it,
+// Rollup aggregates every settled hour since the watermark and advances it,
 // in one transaction, so a crash leaves either the old watermark and no new
 // rows or both.
 //
 // §6.3 takes the last observation of each stop visit: the final word on what
 // happened there, so a trip updated fifty times weighs the same as one
-// updated twice. That last observation is taken across the whole service day
-// and then bucketed by the hour it was made in. Taking it within each hour
-// instead would count a prediction made at 07:10 for a 09:00 stop in the
-// 07:00 bucket as well as the 09:00 one.
+// updated twice. The visit is bucketed by the hour it was scheduled
+// (scheduled_at, migrations/0006), or, unmatched, by the hour of that last
+// observation. Bucketing matched visits by the last observation instead put
+// cancellations in whatever hour the feed stopped mentioning them, which for
+// TfNSW is often many hours later (§16 q12).
 func (j *Job) Rollup(ctx context.Context) (Result, error) {
 	var res Result
 	err := pgx.BeginFunc(ctx, j.pool, func(tx pgx.Tx) error {
@@ -44,7 +45,7 @@ func (j *Job) Rollup(ctx context.Context) (Result, error) {
 		if from.Equal(sentinel) {
 			// First run: start at the first hour anything was observed.
 			var first *time.Time
-			if err := tx.QueryRow(ctx, `SELECT date_trunc('hour', min(feed_ts), 'UTC') FROM observations`).Scan(&first); err != nil {
+			if err := tx.QueryRow(ctx, `SELECT date_trunc('hour', min(coalesce(scheduled_at, feed_ts)), 'UTC') FROM observations`).Scan(&first); err != nil {
 				return fmt.Errorf("find first observation: %w", err)
 			}
 			if first == nil {
@@ -53,18 +54,19 @@ func (j *Job) Rollup(ctx context.Context) (Result, error) {
 			}
 			from = *first
 		}
-		to := j.now().Add(-j.opts.Lag).UTC().Truncate(time.Hour)
+		to := j.now().Add(-j.opts.Settle).UTC().Truncate(time.Hour)
 		res.From, res.To = from, to
 		if !to.After(from) {
 			res.To = from
 			return nil
 		}
 
-		// A stop visit's final observation can only be in [from, to) if the
-		// visit has a row at or after from, so rows before the watermark are
-		// never read. The service-date bounds only let the planner skip whole
-		// partitions: a trip's updates span at most its own service day and
-		// the early hours of the next.
+		// Which rows can belong to a visit bucketed in [from, to): a matched
+		// row carries the visit's scheduled_at, the same on every row of it;
+		// an unmatched visit is bucketed by its last row, which is then at or
+		// after from. Rows outside both are never read. The service-date
+		// bounds let the planner skip whole partitions: a scheduled time lies
+		// within 48 h of its service day's start (SERVICE_TIME_MAX_S).
 		lo := servicetime.CandidateServiceDates(from, 0)[0].AddDate(0, 0, -2)
 		hi := servicetime.CandidateServiceDates(to, 0)[0].AddDate(0, 0, 1)
 		tag, err := tx.Exec(ctx, `
@@ -72,13 +74,15 @@ func (j *Job) Rollup(ctx context.Context) (Result, error) {
 			SELECT * FROM (
 				SELECT DISTINCT ON (service_date, feed_id, trip_id, stop_id)
 				       service_date, stop_id, route_id, direction_id,
-				       observed_delay_s, stop_time_rel, trip_rel, feed_ts
+				       observed_delay_s, stop_time_rel, trip_rel,
+				       coalesce(scheduled_at, feed_ts) AS bucket_ts
 				FROM observations
 				WHERE service_date BETWEEN $1 AND $2
-				  AND feed_ts >= $3
+				  AND (scheduled_at >= $3 AND scheduled_at < $4
+				       OR scheduled_at IS NULL AND feed_ts >= $3)
 				ORDER BY service_date, feed_id, trip_id, stop_id, feed_ts DESC
 			) last_word
-			WHERE feed_ts < $4`, lo, hi, from, to)
+			WHERE bucket_ts >= $3 AND bucket_ts < $4`, lo, hi, from, to)
 		if err != nil {
 			return fmt.Errorf("select final observations: %w", err)
 		}
@@ -113,7 +117,7 @@ func (j *Job) Rollup(ctx context.Context) (Result, error) {
 
 		tag, err = tx.Exec(ctx, `
 			INSERT INTO otp_stop_hourly (bucket_start, service_date, stop_id, route_id, direction_id, `+cols+`)
-			SELECT date_trunc('hour', feed_ts, 'UTC'), max(service_date), stop_id,
+			SELECT date_trunc('hour', bucket_ts, 'UTC'), max(service_date), stop_id,
 			       coalesce(route_id, '~unmatched'), coalesce(direction_id, -1), `+counts+`
 			FROM final
 			GROUP BY 1, 3, 4, 5
@@ -126,7 +130,7 @@ func (j *Job) Rollup(ctx context.Context) (Result, error) {
 
 		tag, err = tx.Exec(ctx, `
 			INSERT INTO otp_route_hourly (bucket_start, service_date, route_id, direction_id, `+cols+`)
-			SELECT date_trunc('hour', feed_ts, 'UTC'), max(service_date),
+			SELECT date_trunc('hour', bucket_ts, 'UTC'), max(service_date),
 			       coalesce(route_id, '~unmatched'), coalesce(direction_id, -1), `+counts+`
 			FROM final
 			GROUP BY 1, 3, 4

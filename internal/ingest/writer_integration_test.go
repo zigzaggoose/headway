@@ -168,16 +168,17 @@ func TestWriter_UnknownValues_AreStoredAsNull(t *testing.T) {
 	var dir *int16
 	var tripRel int16
 	var matched bool
+	var scheduledAt *time.Time
 	err := pool.QueryRow(context.Background(), `
-		SELECT route_id, vehicle_id, stop_sequence, observed_delay_s, direction_id, trip_rel, matched
+		SELECT route_id, vehicle_id, stop_sequence, observed_delay_s, direction_id, trip_rel, matched, scheduled_at
 		FROM observations WHERE trip_id = 'trip-unknown'`).
-		Scan(&routeID, &vehicleID, &stopSeq, &observed, &dir, &tripRel, &matched)
+		Scan(&routeID, &vehicleID, &stopSeq, &observed, &dir, &tripRel, &matched, &scheduledAt)
 	if err != nil {
 		t.Fatalf("read back: %v", err)
 	}
 	for name, v := range map[string]any{
 		"route_id": routeID, "vehicle_id": vehicleID, "stop_sequence": stopSeq,
-		"observed_delay_s": observed, "direction_id": dir,
+		"observed_delay_s": observed, "direction_id": dir, "scheduled_at": scheduledAt,
 	} {
 		if !isNil(v) {
 			t.Errorf("%s = %v, want NULL", name, v)
@@ -192,6 +193,26 @@ func TestWriter_UnknownValues_AreStoredAsNull(t *testing.T) {
 	}
 }
 
+// The rollup buckets by scheduled_at (§16 q12): it has to reach the table
+// exactly, and stay NULL for an unmatched observation (checked above).
+func TestWriter_ScheduledAt_RoundTrips(t *testing.T) {
+	pool := testPool(t)
+	at := time.Date(2026, 9, 22, 15, 10, 0, 0, time.UTC) // 01:10 AEST, past midnight
+	o := sample("trip-s", "stop-1", 30, time.Date(2026, 9, 22, 15, 5, 0, 0, time.UTC))
+	o.ScheduledAt = &at
+
+	w := NewWriter(pool, nil, WriterConfig{}, slog.New(slog.DiscardHandler))
+	w.writeBatch(context.Background(), []Observation{o}, "test")
+
+	var got *time.Time
+	if err := pool.QueryRow(context.Background(), `SELECT scheduled_at FROM observations WHERE trip_id = 'trip-s'`).Scan(&got); err != nil {
+		t.Fatalf("read back: %v", err)
+	}
+	if got == nil || !got.Equal(at) {
+		t.Errorf("scheduled_at = %v, want %s", got, at)
+	}
+}
+
 func isNil(v any) bool {
 	switch p := v.(type) {
 	case *string:
@@ -199,6 +220,8 @@ func isNil(v any) bool {
 	case *int32:
 		return p == nil
 	case *int16:
+		return p == nil
+	case *time.Time:
 		return p == nil
 	}
 	return false

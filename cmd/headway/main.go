@@ -168,6 +168,15 @@ func main() {
 	// limiter, because the quota is per account.
 	schedules := gtfsstatic.NewLoader(db.Pool(), feed.NewClient(cfg.APIKey, 5*time.Minute, time.Now), limiter,
 		cfg.Service.MaxStopTimeS, cfg.Schedule.KeepVersions, time.Now, log)
+	// The timetable already in Postgres goes to the matcher before any poller
+	// starts, so a restart's first poll is matched. A fresh database has none,
+	// and its first polls are unmatched until the download finishes.
+	pubCtx, cancelPub := context.WithTimeout(ctx, time.Minute)
+	if err := schedules.Publish(pubCtx, cfg.Feeds, matcher); err != nil {
+		log.Error("stored schedule not published at startup", "component", "main", "err", err.Error())
+	}
+	cancelPub()
+
 	var background sync.WaitGroup
 	background.Add(1)
 	go func() {
@@ -182,9 +191,9 @@ func main() {
 		RetentionDays: cfg.Maintain.RetentionDays,
 		LookaheadDays: cfg.Maintain.PartitionLookahead,
 		Interval:      cfg.Maintain.Interval,
-		// One hour: long enough for a stop's last update to land, short
-		// enough that /history is at most two hours behind.
-		Lag:          time.Hour,
+		// Three hours after an hour ends: a train later than that is rare,
+		// and /history is then at most four hours behind (§16 q12).
+		Settle:       3 * time.Hour,
 		ExpireFilter: func(before time.Time) { pipeline.ExpireFilterBefore(before) },
 	}, time.Now, log)
 	background.Add(1)

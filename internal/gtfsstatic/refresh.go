@@ -22,6 +22,21 @@ const retryAfter = 15 * time.Minute
 // in about 20 s.
 const loadTimeout = 5 * time.Minute
 
+// Publish hands every feed's active version, if it has one, to the matcher,
+// without downloading anything. main calls it before the pollers start: on a
+// restart the timetable is already in Postgres, and without this the first
+// poll is matched against nothing and written twice, once unmatched and once
+// matched (2,275 redundant rows on one restart, 2026-09-23).
+func (l *Loader) Publish(ctx context.Context, feeds []config.Feed, m *match.Matcher) error {
+	var errs []error
+	for _, f := range feeds {
+		if err := l.publishActive(ctx, f.ID, m); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
+}
+
 // publishActive reads the active version into memory and hands it to the
 // matcher, unless the matcher already has it. Matches in flight finish on the
 // old one (§9.1 step 4). No active version at all is not an error: it is a

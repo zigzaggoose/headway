@@ -24,12 +24,13 @@ INSERT INTO observations (
     service_date, feed_id, trip_id, stop_id, feed_ts,
     stop_sequence, route_id, direction_id,
     arrival_delay_s, departure_delay_s, observed_delay_s,
-    trip_rel, stop_time_rel, matched, vehicle_id)
+    trip_rel, stop_time_rel, matched, vehicle_id, scheduled_at)
 SELECT * FROM unnest(
     $1::date[], $2::text[], $3::text[], $4::text[], $5::timestamptz[],
     $6::integer[], $7::text[], $8::smallint[],
     $9::integer[], $10::integer[], $11::integer[],
-    $12::smallint[], $13::smallint[], $14::boolean[], $15::text[])
+    $12::smallint[], $13::smallint[], $14::boolean[], $15::text[],
+    $16::timestamptz[])
 ON CONFLICT DO NOTHING`
 
 // WriterConfig is the batching policy from §8.
@@ -161,7 +162,7 @@ func (w *Writer) writeBatch(ctx context.Context, batch []Observation, reason str
 			cols.serviceDate, cols.feedID, cols.tripID, cols.stopID, cols.feedTS,
 			cols.stopSequence, cols.routeID, cols.directionID,
 			cols.arrivalDelay, cols.departureDelay, cols.observedDelay,
-			cols.tripRel, cols.stopTimeRel, cols.matched, cols.vehicleID)
+			cols.tripRel, cols.stopTimeRel, cols.matched, cols.vehicleID, cols.scheduledAt)
 		if err != nil {
 			return err
 		}
@@ -191,7 +192,7 @@ func (w *Writer) writeBatch(ctx context.Context, batch []Observation, reason str
 		"duration_ms", time.Since(started).Milliseconds())
 }
 
-// columns is a batch transposed: fifteen arrays rather than n structs, which
+// columns is a batch transposed: sixteen arrays rather than n structs, which
 // is the shape unnest wants.
 type columns struct {
 	serviceDate    []time.Time
@@ -209,6 +210,7 @@ type columns struct {
 	stopTimeRel    []int16
 	matched        []bool
 	vehicleID      []*string
+	scheduledAt    []*time.Time
 }
 
 func columnsOf(batch []Observation) columns {
@@ -229,6 +231,7 @@ func columnsOf(batch []Observation) columns {
 		stopTimeRel:    make([]int16, n),
 		matched:        make([]bool, n),
 		vehicleID:      make([]*string, n),
+		scheduledAt:    make([]*time.Time, n),
 	}
 	for i, o := range batch {
 		c.serviceDate[i] = o.ServiceDate
@@ -246,6 +249,7 @@ func columnsOf(batch []Observation) columns {
 		c.stopTimeRel[i] = int16(o.StopTimeRel)
 		c.matched[i] = o.Matched
 		c.vehicleID[i] = nilIfEmpty(o.VehicleID)
+		c.scheduledAt[i] = o.ScheduledAt
 	}
 	return c
 }

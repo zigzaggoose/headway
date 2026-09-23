@@ -34,6 +34,10 @@ type Observation struct {
 	StopTimeRel int32
 	Matched     bool
 	VehicleID   string
+
+	// ScheduledAt is when the timetable has this visit, set when the matcher
+	// resolves the stop. The rollup buckets by it; nil falls back to FeedTS.
+	ScheduledAt *time.Time
 }
 
 // Key identifies the thing being observed, independent of when it was

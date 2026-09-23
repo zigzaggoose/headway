@@ -26,11 +26,12 @@ type Options struct {
 	RetentionDays int           // RETENTION_DAYS
 	LookaheadDays int           // PARTITION_LOOKAHEAD_DAYS
 	Interval      time.Duration // MAINTENANCE_INTERVAL
-	// Lag keeps the newest hours out of the rollup. A stop's last update
-	// usually comes as the train passes it, but not always within the same
-	// hour, and a bucket rolled up too soon would count that stop again when
-	// its final update lands in the next one.
-	Lag time.Duration
+	// Settle is how long after an hour ends it is rolled up. Visits are
+	// bucketed by their scheduled hour, and a late train's final word comes
+	// after that hour; each hour is rolled up once, so anything said about it
+	// after Settle is not counted. Nothing is ever counted twice, because a
+	// visit's scheduled hour does not move.
+	Settle time.Duration
 	// ExpireFilter, when set, is called every tick with the oldest service
 	// date still worth remembering (§9.3 case 1). A function rather than the
 	// pipeline, so this package stays ignorant of ingest.
@@ -211,9 +212,11 @@ func (j *Job) DropPartitionsBefore(ctx context.Context, cutoff time.Time) ([]str
 			if _, err := tx.Exec(ctx, `SET LOCAL lock_timeout = '5s'`); err != nil {
 				return err
 			}
+			// Pending means a visit in this partition is bucketed at or past
+			// the watermark, by the same expression the rollup buckets on.
 			var pending bool
 			if err := tx.QueryRow(ctx, fmt.Sprintf(`
-				SELECT EXISTS (SELECT 1 FROM %s WHERE feed_ts >= (SELECT watermark FROM rollup_state WHERE name = 'hourly'))`, ident),
+				SELECT EXISTS (SELECT 1 FROM %s WHERE coalesce(scheduled_at, feed_ts) >= (SELECT watermark FROM rollup_state WHERE name = 'hourly'))`, ident),
 			).Scan(&pending); err != nil {
 				return err
 			}

@@ -502,3 +502,20 @@ func TestRun_DownloadFailsAtStartup_PublishesTheVersionAlreadyActive(t *testing.
 		time.Sleep(20 * time.Millisecond)
 	}
 }
+
+// On a restart the timetable is already in Postgres; Publish hands it to the
+// matcher with no download at all.
+func TestPublish_ActiveVersion_ReachesTheMatcherWithoutADownload(t *testing.T) {
+	h := newHarness(t, 3)
+	h.up.set(gtfs(t, "a"), lm1)
+	id, _ := h.load(t)
+	before := h.up.requests
+
+	if err := h.loader.Publish(context.Background(), []config.Feed{h.feed, {ID: "other"}}, h.matcher); err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+
+	if h.matcher.Loaded(h.feed.ID) != id || h.up.requests != before {
+		t.Errorf("matcher has %d (want %d) after %d downloads (want none)", h.matcher.Loaded(h.feed.ID), id, h.up.requests-before)
+	}
+}

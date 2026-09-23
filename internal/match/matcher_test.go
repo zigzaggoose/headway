@@ -531,3 +531,42 @@ func TestMatcher_LastCounts_ReadWhileMatchingIsRaceFree(t *testing.T) {
 		t.Errorf("last counts = %+v, want the final poll's", c)
 	}
 }
+
+// The rollup buckets by ScheduledAt (§16 q12), so it must be the visit's
+// timetable time on the chosen service date, and only when the stop resolved.
+func TestMatch_ScheduledAt_IsTheTimetableTimeOnTheServiceDate(t *testing.T) {
+	m := matcher(true)
+	t.Run("a full match carries the departure time", func(t *testing.T) {
+		o, _ := one(t, m, update("T-1", "B", at(8, 5)))
+		if o.ScheduledAt == nil || !o.ScheduledAt.Equal(at(8, 10)) {
+			t.Errorf("scheduled_at = %v, want 08:10", o.ScheduledAt)
+		}
+	})
+	t.Run("a stop with no departure falls back to its arrival", func(t *testing.T) {
+		o, _ := one(t, m, update("T-1", "C", at(8, 15)))
+		if o.ScheduledAt == nil || !o.ScheduledAt.Equal(at(8, 20)) {
+			t.Errorf("scheduled_at = %v, want 08:20", o.ScheduledAt)
+		}
+	})
+	t.Run("past midnight it is on the next calendar day", func(t *testing.T) {
+		o, _ := one(t, m, update("T-N", "B", at(0, 30)))
+		if want := at(1, 10); o.ScheduledAt == nil || !o.ScheduledAt.Equal(want) {
+			t.Errorf("scheduled_at = %v, want %s (25:10 on the 22nd)", o.ScheduledAt, want)
+		}
+	})
+	t.Run("trip-only and unmatched have none", func(t *testing.T) {
+		for _, u := range []gtfsrt.RawUpdate{update("T-1", "Z", at(8, 5)), update("NOPE", "A", at(8, 5))} {
+			if o, _ := one(t, m, u); o.ScheduledAt != nil {
+				t.Errorf("%s at %s: scheduled_at = %v, want nil", u.TripID, u.StopID, o.ScheduledAt)
+			}
+		}
+	})
+	t.Run("each synthesised cancellation carries its own stop's time", func(t *testing.T) {
+		u := update("T-1", "", at(7, 30))
+		u.TripLevel, u.TripRel = true, gtfsrt.TripCanceled
+		obs, _ := m.Match(feedID, []gtfsrt.RawUpdate{u})
+		if len(obs) != 3 || !obs[0].ScheduledAt.Equal(at(8, 0)) || !obs[2].ScheduledAt.Equal(at(8, 20)) {
+			t.Errorf("cancelled stops scheduled at %v .. %v", obs[0].ScheduledAt, obs[len(obs)-1].ScheduledAt)
+		}
+	})
+}
