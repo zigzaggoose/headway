@@ -519,3 +519,41 @@ func TestPublish_ActiveVersion_ReachesTheMatcherWithoutADownload(t *testing.T) {
 		t.Errorf("matcher has %d (want %d) after %d downloads (want none)", h.matcher.Loaded(h.feed.ID), id, h.up.requests-before)
 	}
 }
+
+// §12 Stage 3: several feeds each keep exactly one active version, and a new
+// version for one never deactivates another's.
+func TestLoad_SeveralFeeds_ActivateIndependently(t *testing.T) {
+	h := newHarness(t, 3)
+	h.up.set(gtfs(t, "a"), lm1)
+	trains, _ := h.load(t)
+
+	ferriesSrv := &upstream{}
+	ferriesSrv.set(gtfs(t, "ferry"), lm1)
+	srv := httptest.NewServer(ferriesSrv)
+	t.Cleanup(srv.Close)
+	ferries := config.Feed{ID: "sydneyferries", ScheduleURL: srv.URL}
+	fid, _, err := h.loader.Load(context.Background(), ferries)
+	if err != nil {
+		t.Fatalf("load ferries: %v", err)
+	}
+
+	h.up.set(gtfs(t, "b"), lm1.Add(time.Hour))
+	newTrains, _ := h.load(t)
+
+	active := map[string]int64{}
+	rows, err := h.pool.Query(context.Background(), `SELECT feed_id, id FROM schedule_versions WHERE active`)
+	if err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	for rows.Next() {
+		var f string
+		var id int64
+		if err := rows.Scan(&f, &id); err != nil {
+			t.Fatalf("scan: %v", err)
+		}
+		active[f] = id
+	}
+	if len(active) != 2 || active["sydneytrains"] != newTrains || active["sydneyferries"] != fid || newTrains == trains {
+		t.Errorf("active = %v; want trains %d (not %d) and ferries %d", active, newTrains, trains, fid)
+	}
+}

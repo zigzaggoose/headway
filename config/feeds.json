@@ -7,6 +7,46 @@
       "schedule_url": "https://api.transport.nsw.gov.au/v1/gtfs/schedule/sydneytrains",
       "route_type": 2,
       "enabled": true
+    },
+    {
+      "id": "metro",
+      "label": "Sydney Metro",
+      "realtime_url": "https://api.transport.nsw.gov.au/v2/gtfs/realtime/metro",
+      "schedule_url": "https://api.transport.nsw.gov.au/v2/gtfs/schedule/metro",
+      "route_type": 401,
+      "enabled": true
+    },
+    {
+      "id": "sydneyferries",
+      "label": "Sydney Ferries",
+      "realtime_url": "https://api.transport.nsw.gov.au/v1/gtfs/realtime/ferries/sydneyferries",
+      "schedule_url": "https://api.transport.nsw.gov.au/v1/gtfs/schedule/ferries/sydneyferries",
+      "route_type": 4,
+      "enabled": true
+    },
+    {
+      "id": "lightrail-cbdandsoutheast",
+      "label": "Light Rail: CBD and South East",
+      "realtime_url": "https://api.transport.nsw.gov.au/v1/gtfs/realtime/lightrail/cbdandsoutheast",
+      "schedule_url": "https://api.transport.nsw.gov.au/v1/gtfs/schedule/lightrail/cbdandsoutheast",
+      "route_type": 900,
+      "enabled": true
+    },
+    {
+      "id": "lightrail-parramatta",
+      "label": "Light Rail: Parramatta",
+      "realtime_url": "https://api.transport.nsw.gov.au/v1/gtfs/realtime/lightrail/parramatta",
+      "schedule_url": "https://api.transport.nsw.gov.au/v1/gtfs/schedule/lightrail/parramatta",
+      "route_type": 900,
+      "enabled": true
+    },
+    {
+      "id": "buses",
+      "label": "Sydney buses",
+      "realtime_url": "https://api.transport.nsw.gov.au/v1/gtfs/realtime/buses",
+      "schedule_url": "https://api.transport.nsw.gov.au/v1/gtfs/schedule/buses",
+      "route_type": 700,
+      "enabled": false
     }
   ]
 }
