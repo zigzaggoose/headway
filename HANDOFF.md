@@ -21,10 +21,10 @@ test because `make test-integration | grep | tail` hid the status.
 
 ## Where we are
 
-**Stage 2 is complete** (every §12 box ticked, CI green). **Stage 1 has two open
+**Stage 2 is complete, Stage 3 all but storage-over-a-day** (CI green). **Stage 1 has two open
 boxes, both the VM**, deferred by the user's choice — not paying yet.
 
-The service polls the Sydney Trains feed every 15 s, matches updates against the
+The service polls five feeds (trains, metro, ferries, two light rail) every 15 s, matches updates against the
 daily timetable (99.67 % live), stores them in daily partitions, rolls them up
 hourly, and serves `/v1/lines`, `/v1/lines/{id}/now`, `/v1/stops/{id}/now`, both
 history endpoints, `/v1/admin/stats`, `/healthz` and `/readyz`. The README has the
@@ -32,10 +32,11 @@ measured numbers.
 
 ## Do this next
 
-1. **Stage 3** (§12): more feeds, the load test, storage measurements — in progress.
-   §16 q12 is answered and built (2026-09-23): rollups bucket by `scheduled_at`
-   and roll each hour up three hours after it ends, so `/history` runs up to four
-   hours behind.
+1. **Stage 3 has one box left: storage over a full day** (`docs/storage.md` says
+   what to run). It needs 24 h of the service running, which means the VM.
+   Everything else in Stage 3 is done: five feeds (buses off by the user's
+   choice), quota table, per-feed versions, `-maintain-once`, load test,
+   profiling fix (all-routes rollup rows), rate limiter, `PPROF_ADDR`.
 2. **Deploy** when the user is ready to pay: BinaryLane Standard 1 GB, Sydney,
    Ubuntu 24.04. Clone to `/opt/headway`, put `.env` there with
    `POSTGRES_PASSWORD`, `make up`. Write `deploy/vm-bootstrap.md` from what is

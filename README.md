@@ -13,10 +13,12 @@ and the realtime feed is not archived anywhere queryable. Headway captures it.
 
 ## Status
 
-Stage 2 — schedule matching, history and CI — is complete (`PROJECT.md` §12).
-The Sydney Trains feed is polled every 15 s, matched against the daily
-timetable, stored, rolled up hourly and served. Not yet deployed: the hosting
-is chosen (a BinaryLane VM in Sydney) and `deploy/` is ready for it.
+Stages 1–2 are complete and Stage 3 is nearly so (`PROJECT.md` §12). Five
+feeds — Sydney Trains, Metro, Sydney Ferries and both light rail lines — are
+polled every 15 s, matched against their daily timetables, stored, rolled up
+hourly and served. Buses are left off: they would not fit the 1 GB VM
+(`docs/quota.md`). Not yet deployed: the hosting is chosen (a BinaryLane VM in
+Sydney) and `deploy/` is ready for it.
 
 ## How it works
 
@@ -58,18 +60,19 @@ Measured, with dates, not estimated (`PROJECT.md` §13):
 
 | | |
 |---|---|
-| Match rate, Sydney Trains | **99.67 %** of stop updates matched to the timetable (2026-09-23, four live polls; `ADDED` trips excluded) |
+| Match rate | Trains **99.6–99.7 %**; Metro, Ferries, Parramatta light rail **100 %**; CBD light rail 89.7 %, every miss a cancellation of a trip variant missing from its bundle (2026-09-23, live; `ADDED` excluded) |
+| API latency at 50 RPS | `/now` p95 **1.4 ms**; 30-day history p95 **24 ms** (stop) and 21 ms (route); 15,000 of 15,000 requests OK per run (`docs/loadtest.md`) |
 | Updates per poll | 2,859–3,939 across the polls measured (2026-09-21 and 23, evening and off-peak) |
 | Change filter | 100 % of updates identical across two polls 15 s apart (2026-09-21) |
 | Raw storage | 276.9 bytes per row (2026-09-21) |
 | Timetable load | 11.3 MB zip → 68,738 trips, 1,244,526 stop times in 19.9 s, peak 54 MB RSS |
-| Service memory | 146 MB RSS with the whole timetable loaded, 31 MB without |
+| Service memory | 196 MB RSS with all five timetables loaded; 141 MiB for trains alone under Compose, beside Postgres at 300 MiB |
 | Rollup | 878 stop visits into hourly buckets in 145 ms |
 | Container image | 23.9 MB, distroless, non-root |
 | Tests | 367 tests and subtests (319 without a database), 80.2 % statement coverage |
 
-Still to measure: API latency under load and peak-hour volume (Stage 3), and
-uptime (after deployment).
+Still to measure: a full day's storage, peak-hour volume and uptime — all of
+which need the VM (`docs/storage.md`).
 
 ## API
 
