@@ -13,10 +13,77 @@ and the realtime feed is not archived anywhere queryable. Headway captures it.
 
 ## Status
 
-Stage 1 code complete: it polls the Sydney Trains feed every 15 s, stores
-unmatched delay observations, and serves `/v1/lines/{id}/now`, `/healthz` and
-`/readyz`. Not yet deployed; timetable matching is Stage 2. `PROJECT.md` §12
-tracks the milestones.
+Stage 2 — schedule matching, history and CI — is complete (`PROJECT.md` §12).
+The Sydney Trains feed is polled every 15 s, matched against the daily
+timetable, stored, rolled up hourly and served. Not yet deployed: the hosting
+is chosen (a BinaryLane VM in Sydney) and `deploy/` is ready for it.
+
+## How it works
+
+```mermaid
+flowchart LR
+    TfNSW[(TfNSW API)] -->|every 15 s| P[poller]
+    TfNSW -->|daily bundle| L[schedule loader]
+    P --> D[decoder] --> M[matcher]
+    L -->|timetable| PG[(PostgreSQL)]
+    L -->|atomic swap| M
+    M --> C[latest-state cache]
+    M --> F[change filter] --> Q[bounded queue] --> W[batch writer] --> PG
+    R[rollup job] -->|hourly buckets,<br/>partitions, retention| PG
+    C --> A[HTTP API]
+    PG -->|history| A
+```
+
+One Go process, one Postgres, one VM. Each box is a package with one job
+(`PROJECT.md` §4.2): the decoder knows nothing about the timetable, the matcher
+nothing about SQL, and the API never writes. The queue drops rather than blocks,
+so a slow database can never stall a poller. Observations are partitioned by
+service day and dropped after `RETENTION_DAYS`; the hourly rollups are kept.
+
+The hard parts, each written up in `PROJECT.md` §9:
+
+- **Service days and daylight saving.** GTFS times such as `25:10:00` are
+  offsets from noon minus twelve hours on the service date, which is 23:00 the
+  night before on the October change and 01:00 on the April one. Both
+  transitions are hard-coded test fixtures.
+- **Matching.** The feed never sends `stop_sequence` or `start_date`, so a
+  trip is placed on its service date by its calendar and how close its
+  scheduled time is to the update.
+- **Idempotence.** Every row is keyed on the feed's own timestamp, so replaying
+  a response writes nothing new.
+
+## Numbers
+
+Measured, with dates, not estimated (`PROJECT.md` §13):
+
+| | |
+|---|---|
+| Match rate, Sydney Trains | **99.67 %** of stop updates matched to the timetable (2026-09-23, four live polls; `ADDED` trips excluded) |
+| Updates per poll | 2,859–3,939 across the polls measured (2026-09-21 and 23, evening and off-peak) |
+| Change filter | 100 % of updates identical across two polls 15 s apart (2026-09-21) |
+| Raw storage | 276.9 bytes per row (2026-09-21) |
+| Timetable load | 11.3 MB zip → 68,738 trips, 1,244,526 stop times in 19.9 s, peak 54 MB RSS |
+| Service memory | 146 MB RSS with the whole timetable loaded, 31 MB without |
+| Rollup | 878 stop visits into hourly buckets in 145 ms |
+| Container image | 23.9 MB, distroless, non-root |
+| Tests | 367 tests and subtests (319 without a database), 80.2 % statement coverage |
+
+Still to measure: API latency under load and peak-hour volume (Stage 3), and
+uptime (after deployment).
+
+## API
+
+```sh
+curl localhost:8080/v1/lines                                   # every route in the timetable
+curl localhost:8080/v1/lines/APS_1a/now                        # what the T8 is doing now
+curl localhost:8080/v1/stops/2020102/now?window_min=30         # departures from a stop
+curl "localhost:8080/v1/lines/APS_1a/history?from=2026-09-20&bucket=day"
+curl localhost:8080/readyz
+```
+
+Route and stop ids are TfNSW's own (`APS_1a` is one T8 pattern; `2020102` is
+International Station, Platform 2). `PROJECT.md` §7 is the contract, including
+every error code.
 
 ## Running it
 
@@ -28,13 +95,13 @@ docker run -d --name headway-dev-pg -p 5432:5432 \
   postgres:18-alpine
 
 make migrate             # apply migrations; the service also does this on start
-make run                 # poll, decode, serve
+make run                 # poll, match, store, serve on :8080
 ```
 
 `make test` runs the unit tests; `make test-integration` also runs the ones
 needing a database, and skips them when `DATABASE_URL_TEST` is unset. Both URLs
-in `.env.example` already point at the container above. `make lint` is gofmt
-and go vet.
+in `.env.example` already point at the container above. `make lint` is gofmt,
+go vet and staticcheck, exactly as CI runs them.
 
 To run the whole thing as it is deployed — Postgres and the service in Compose,
 built from `deploy/Dockerfile` — set `POSTGRES_PASSWORD` in `.env` and:
@@ -51,5 +118,5 @@ Every configuration variable is documented in `.env.example` and in
 ## Stack
 
 Go 1.27, PostgreSQL 18, pgx v5, the standard library's `ServeMux` and
-`log/slog`. One process, one database, one VM. `PROJECT.md` §3 says what each
-was chosen over and why.
+`log/slog`. Three direct dependencies. `PROJECT.md` §3 says what each was chosen
+over and why.

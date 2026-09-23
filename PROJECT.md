@@ -1373,7 +1373,7 @@ Representative lines:
 {"time":"2026-09-21T11:05:44.900+10:00","level":"INFO","msg":"http request","component":"api","request_id":"01JBQ8Z2M4K9","method":"GET","path":"/v1/lines/T1-EXAMPLE/now","status":200,"duration_ms":7,"bytes":4102,"remote":"203.0.113.9"}
 ```
 
-Access logs are `info`. A 5xx also emits one `error` line carrying the same `request_id`, so the JSON message returned to the client can be looked up.
+Access logs are `info`. A 5xx other than 503 also emits one `error` line carrying the same `request_id`, so the JSON message returned to the client can be looked up. A 503 is `not_ready` — what every readiness probe gets while the timetable loads — and logging those at `error` buried real errors under startup noise (seen live 2026-09-23).
 
 ### 10.3 Metrics
 
@@ -1460,10 +1460,10 @@ One alert is required by the Definition of Done; these are the candidates, in pr
 2. `go build ./...`
 3. `go vet ./...`
 4. `gofmt -l .` — fails if non-empty.
-5. `staticcheck ./...` — added at Stage 2, not before.
+5. `staticcheck ./...` — added at Stage 2, not before. Pinned (`v0.8.1`) and run through `go run`, so it is a tool, not a `go.mod` dependency; `make lint` runs the same version.
 6. `go test -race -count=1 ./...` (unit only).
 7. Start a `postgres:18-alpine` service container; run `go test -race -tags=integration -count=1 ./...` with `DATABASE_URL_TEST` pointed at it.
-8. `go test -coverprofile=coverage.out ./...` and print the total. No coverage gate in v1 — a gate on a project this size encourages testing the wrong things. [DECIDED — revisit at Stage 4.]
+8. `go test -tags=integration -coverprofile=coverage.out ./...` and print the total (the tag since 2026-09-23: without it the SQL-heavy packages report a third of their real coverage). No coverage gate in v1 — a gate on a project this size encourages testing the wrong things. [DECIDED — revisit at Stage 4.]
 9. Cross-compile check: `GOOS=linux GOARCH=amd64 go build ./cmd/headway`. This catches the single most likely deployment failure.
 
 `.github/workflows/docker.yml`, on a tag: build `linux/amd64` and push to GitHub Container Registry.
@@ -1503,9 +1503,9 @@ Each stage ends in something that runs and can be demonstrated. **Stage 2 is the
 - [x] `migrations/0003`: rollup tables; `internal/rollup` hourly job with the retention guard. Two bugs in §6.3's SQL found and fixed before they ran (§15); the 17,532 dev rows stranded in `observations_default` moved into a daily partition on first start.
 - [x] `/v1/stops/{id}/history` and `/v1/lines/{id}/history`. Live 2026-09-23 on the first real rollup (878 stop visits, 145 ms): T8 (`APS_1a`) at 21:00, 65 visits, 100 % on time, mean delay 1.1 s.
 - [x] `/v1/lines`, `/v1/stops/{id}/now`, `/v1/admin/stats`. Answered from the in-memory timetable (routes and stop names added to `match.Schedule`) and the latest-state cache; admin stats also reads partition and watermark state from Postgres.
-- [ ] `.github/workflows/ci.yml` complete including the Postgres service container and the amd64 cross-compile.
+- [x] `.github/workflows/ci.yml` complete including the Postgres service container and the amd64 cross-compile. Green on its first run (2026-09-23, run 35863474031), integration tests executing against the service container.
 - [x] Match rate measured and recorded. If below 90 %, fix before moving on. **99.67 %** live on 2026-09-23 (≈2,700 full matches, 7 trip-only, 9 unknown trips per poll; 10 ADDED excluded).
-- [ ] README: architecture diagram, the numbers from §13, how to run it.
+- [x] README: architecture diagram, the numbers from §13, how to run it.
 - **Demo:** "here is how often the T1 was late at Strathfield last week, by hour."
 
 ### Stage 3 — All modes, scale, retention, load test
@@ -1549,11 +1549,12 @@ These are the numbers that go in the README and on the resume. Anything marked "
 | API p99 latency, `/now` | same run | ≤ 250 ms |
 | Storage per day, raw | `pg_total_relation_size('observations_YYYY_MM_DD')` | **First measurement 2026-09-21: 276.9 bytes/row** (632 kB heap + 568 kB indexes over 4,586 rows, in `observations_default`). Projected from the off-peak write rate: ~270 MB/day, ~1.9 GB at the deployed 7 days (§16 q6), ~3.7 GB at the 14-day default, against the ≤ 10 GB target. Treat as a floor: one feed, off-peak, and a small table whose index overhead does not yet amortise. Re-measure per §12 Stage 3. |
 | Storage per day, rollups only | Size delta of `otp_*_hourly` per day | baseline TBD |
+| Memory, deployed shape | `docker stats` under Compose | **Measured 2026-09-23:** service 140.8 MiB with the whole timetable loaded, Postgres 299.9 MiB (`shared_buffers=128MB`), ~440 MiB together against the VM's 1 GB. |
 | Storage reduction from rollups | `1 − (rollup bytes / raw bytes)` for the same day | baseline TBD; report honestly |
 | Total database size at steady state | `pg_database_size('headway')` after `RETENTION_DAYS` have elapsed | ≤ 10 GB |
 | Match rate | `headway_match_rate`, trains feed, excluding `ADDED` | ≥ 0.90. **Measured 2026-09-23: 0.9967** over four consecutive live polls, from the matcher's own counts (the metric itself is Stage 4). |
 | Upstream requests per day | `increase(headway_feed_requests_total[24h])` | ≤ `FEED_DAILY_BUDGET` |
-| Test count and coverage | `go test ./... -coverprofile` total | baseline TBD; report the number, not a grade |
+| Test count and coverage | `go test ./... -coverprofile` total | **Measured 2026-09-23: 367 tests and subtests with `-tags=integration` (319 unit-only), 80.2 % of statements** including `cmd/` at 0 %; packages range 79.8 % (`rollup`) to 100 % (`cache`). |
 | Uptime | `time() - process_start_time_seconds`, plus a note of the longest unbroken run | ≥ 7 days for the Definition of Done |
 | Dropped observations | `headway_dropped_total` | 0 in steady state |
 
@@ -1745,6 +1746,8 @@ Append-only. To reverse a decision, add a row that names the one it supersedes.
 | 2026-09-23 | The rollup takes each stop visit's last observation over all its rows and then buckets it, stores `max(service_date)` rather than grouping on it, lags the newest hour by one hour, and runs in one transaction with the watermark. Partition creation moves rows already in `observations_default` into a standalone table and attaches it. Retention drops a partition only if it has no row at or past the watermark. `rollup` gets a filter-expiry function rather than the pipeline. | §6.3's query counted early predictions in the wrong hour and would have failed every midnight with `ON CONFLICT DO UPDATE command cannot affect row a second time` — the regression test reproduces that exact error against the old grouping. Without the move, the first start on any database that ran before this job existed fails to create today's partition. "No row past the watermark" is exact where "service date before the watermark's date" is not, since a service day's rows run into the next morning. | Taking the final observation per hour (§6.3 as written); a service-date-only retention guard; `DETACH`ing the default partition to move rows (locks writes for longer); passing `*ingest.Pipeline` to rollup (breaks §4.2's boundary). |
 | 2026-09-23 | History responses combine rollup rows in the API: counts, `on_time_pct` and the mean exactly, and p50/p90 as the visit-weighted median of the rows' percentiles whenever a value spans more than one row. The store returns raw hourly rows plus the stop's or route's name from the active version; route history carries `short_name` where stop history carries `name`. | Chosen by the user from three options. Percentiles are not combinable, and a stop without a route filter, every day bucket, and every total spans several rows; nulls there would leave most answers without a percentile. Keeping the grouping in Go keeps one simple indexed query per request and puts all the arithmetic where it is unit-tested. | Null percentiles whenever rows combine; storing a delay histogram per rollup row (exact to the bin, but a migration and more storage); aggregating in SQL (percentiles would still need the same approximation). |
 | 2026-09-23 | Stage 2 `/now` semantics: data endpoints are `503 not_ready` without a loaded timetable and a route or stop is known iff the timetable has it, superseding the Stage 1 row; `status` gains `cancelled` (chosen by the user over omitting cancelled trips or adding a `trip_rel` field). `/v1/lines`, `/v1/stops/{id}/now` and `/now`'s timetable fields are answered from `match.Schedule`, which now also holds routes and stop names, instead of querying Postgres. Duplicate keys within one poll resolve last-wins in the matcher. | The timetable is already in memory for the matcher, immutable and lock-free to read; routes and stops add ~1,300 small entries. §9.1 case 14 says the last entity wins, but `ON CONFLICT DO NOTHING` kept the first. A cancelled departure shown as `unknown` would read as "no information" rather than "not running". | Per-request SQL for route and stop names; leaving case 14 to the database; a second cache of timetable metadata in the API. |
+| 2026-09-23 | The change filter treats a change in `matched` as a change. | Found in the post-Stage-2 end-to-end test: every row written before the timetable loaded stayed unmatched in the database for good, because the matched version of the same delay was suppressed as unchanged. 2,535 such rows after one fresh start. A regression test fails without the fix. | Re-matching old rows in SQL after the timetable loads (a second write path); widening the filter's value to every column (redundant writes for fields no query distinguishes). |
+| 2026-09-23 | A 503 does not emit §10.2's extra `error` log line; other 5xx still do. `/v1/lines` sorts routes without a short name last. | 503 is `not_ready`, the expected answer to every readiness probe while the timetable loads; a fresh start logged a dozen ERROR lines in 25 s, which would bury a real one. TfNSW's empty-train `RTTA_*` routes have no short name and sorted to the top. | Logging 503s at `warn` (still noise at the rate probes run). |
 
 ---
 
@@ -1765,6 +1768,7 @@ Each needs the human's input. Each has a default that will be used until it is a
 | 9 | **Should vehicle positions be ingested at all?** They would allow a map and a "where is the train" view, at roughly double the quota cost and a second table. | No. Explicitly a non-goal for v1 (§2). Revisit only after Stage 4 is complete. |
 | 11 | **ANSWERED 2026-09-21 — see the Decision Log.** The observations primary key included `stop_sequence`, and the feed never sends one. Order-1 and order-2 matches can take it from the timetable, but an unmatched update (order 4) has no `stop_sequence` and no way to get one — and the column is `NOT NULL` and part of the key. Writing unmatched observations is what tells us the match rate is falling (§15), so they must be storable. The options: a sentinel `stop_sequence` for unmatched rows, which collides when one trip has several unmatched stops; swapping `stop_id` for `stop_sequence` in the key, which collides when a trip visits one stop twice; or adding a synthetic per-update ordinal. This changes `migrations/0002`, so it needs a decision before the matcher is written. | **Decided:** key on `(service_date, feed_id, trip_id, stop_id, feed_ts)`, `stop_sequence` nullable, applied in `migrations/0005`. The cost — a loop service losing its second visit within one feed timestamp — is asserted by `TestWriter_LoopService_LosesTheSecondVisitInOneFeedTimestamp` rather than left to be discovered. |
 | 10 | **Is the repository public?** It affects whether GitHub Actions minutes are free and whether the API key can ever appear in a CI log. | Public. Therefore: no secrets in CI logs, no live API calls in CI, and `.env` stays in `.gitignore` from the first commit. |
+| 12 | **Which hour does a stop visit belong to in the rollup?** Rows are bucketed by the `feed_ts` of the visit's last observation (§6.3). For a normal trip that is when the train passed. But TfNSW keeps cancelled (`trip_rel` 3) and replacement (5) trips in the feed long after their time: at 23:00 on 2026-09-23, 122 of 143 cancellation rows and 95 of 303 replacement rows were more than 6 h past their scheduled time, so this morning's cancellations are counted in the 23:00 bucket. `SCHEDULED` trips were fine (1,108 of 1,108 within 6 h, 96 % within 1 h). | Unchanged until decided: bucket by `feed_ts`. **Proposed:** store `scheduled_at` on matched observations (new migration) and bucket by `coalesce(scheduled_at, feed_ts)`, recomputing the last few hours on each tick (`ON CONFLICT DO UPDATE` already makes that safe). This changes what the history endpoints mean — "visits scheduled in this hour" rather than "visits last reported in this hour" — so it needs the user's call. |
 
 ---
 

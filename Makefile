@@ -27,8 +27,8 @@ test: ## Unit tests, race detector on, no cache.
 test-integration: ## Unit plus integration tests. Needs DATABASE_URL_TEST.
 	@$(LOADENV) $(GO) test -race -tags=integration -count=1 ./...
 
-cover: ## Print total coverage. No gate in v1 (§11.3).
-	$(GO) test -coverprofile=coverage.out ./...
+cover: ## Print total coverage, integration tests included. No gate in v1 (§11.3).
+	@$(LOADENV) $(GO) test -tags=integration -coverprofile=coverage.out ./...
 	$(GO) tool cover -func=coverage.out | tail -1
 
 # Run through go run at a pinned version, so it is a tool and not a

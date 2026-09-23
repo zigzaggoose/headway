@@ -66,10 +66,12 @@ jobs:
         run: go test -race -tags=integration -count=1 ./...
 
       # No gate in v1: a threshold on a project this size rewards testing the
-      # wrong things (§11.3). The number is printed so it is seen.
+      # wrong things (§11.3). The number is printed so it is seen. With the
+      # integration tag, because without it every package whose job is SQL
+      # reports a third of its real coverage.
       - name: Coverage
         run: |
-          go test -coverprofile=coverage.out ./...
+          go test -tags=integration -coverprofile=coverage.out ./...
           go tool cover -func=coverage.out | tail -1
 
       # The single most likely deployment failure: the VM is x86-64 and the

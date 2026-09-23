@@ -1,9 +1,7 @@
 # HANDOFF.md
 
-Session state as of **2026-09-23**; the "Completed this session" and "Decisions"
-sections below are from 2026-09-21. Delete or rewrite this file when it stops
-being true. Permanent rules live in `CLAUDE.md`; design lives in
-`PROJECT.md`.
+Session state as of **2026-09-23**. Delete or rewrite this file when it stops
+being true. Permanent rules live in `CLAUDE.md`; design lives in `PROJECT.md`.
 
 ## Run these first
 
@@ -13,168 +11,74 @@ docker start headway-dev-pg         # or the docker run in README.md if it is go
 make lint && make test && make test-integration
 ```
 
-Everything should be green. If `test-integration` skips, `DATABASE_URL_TEST` is not
-set — it is in `.env`, which `make` sources but a bare `go test` does not.
+Everything should be green, and CI (`.github/workflows/ci.yml`) runs the same.
+`make lint` now includes staticcheck, pinned to v0.8.1 and run through `go run`.
+If `test-integration` skips, `DATABASE_URL_TEST` is not set — it is in `.env`,
+which `make` sources but a bare `go test` does not.
+
+**Check exit codes, not piped output.** A commit was once pushed with a failing
+test because `make test-integration | grep | tail` hid the status.
 
 ## Where we are
 
-**Stage 1 (MVP), 13 of 15 items done** — every code item. The two left are the VM
-and the deployed demo, deferred by the user. Stage 2 has `servicetime` done.
+**Stage 2 is complete** (every §12 box ticked, CI green). **Stage 1 has two open
+boxes, both the VM**, deferred by the user's choice — not paying yet.
 
-Working end to end today (2026-09-23): the service starts, applies migrations, polls
-the live TfNSW feed every 15 s, decodes ~3,250 updates per poll, converts them with
-`match.Unmatched`, and writes rows through the change filter and batch writer. A 50 s
-live run wrote 3,887 rows from 4 polls, 0 failed, 0 dropped, and flushed the final
-batch on SIGINT. Trip-level updates (~150 per poll) are skipped until the matcher
-can expand them.
-
-Observed on that run and not yet explained: `observed_delay_s` ranged 0 to 5,482 —
-no negative (early) value at all across 3,887 rows. Check at Stage 2 whether TfNSW
-clamps early running to zero, because that would bias every on-time percentage.
+The service polls the Sydney Trains feed every 15 s, matches updates against the
+daily timetable (99.67 % live), stores them in daily partitions, rolls them up
+hourly, and serves `/v1/lines`, `/v1/lines/{id}/now`, `/v1/stops/{id}/now`, both
+history endpoints, `/v1/admin/stats`, `/healthz` and `/readyz`. The README has the
+measured numbers.
 
 ## Do this next
 
-**`/v1/lines`, `/v1/stops/{id}/now`, `/v1/admin/stats`** (§7.1), then CI and the README
-(§12 Stage 2). These are §7 contract work: the shapes are specified; ask before
-deviating. `/v1/lines/{id}/now` still decides "known route" from the live feed — with
-the schedule now loaded it should use `routes` (Stage 1 note in §7.1).
+1. **Answer §16 q12 with the user** — which hour a stop visit belongs to in the
+   rollup. TfNSW keeps cancelled and replacement trips in the feed for hours
+   after their time, so bucketing by the last observation's `feed_ts` puts this
+   morning's cancellations in tonight's buckets. The proposal is a `scheduled_at`
+   column and bucketing by it. It changes what history means, so it is the user's
+   call, and it is better decided before the VM starts collecting for real.
+2. **Deploy** when the user is ready to pay: BinaryLane Standard 1 GB, Sydney,
+   Ubuntu 24.04. Clone to `/opt/headway`, put `.env` there with
+   `POSTGRES_PASSWORD`, `make up`. Write `deploy/vm-bootstrap.md` from what is
+   actually run. Stage 1's last two boxes close there.
+3. **Stage 3** (§12): more feeds, the load test, storage measurements.
 
-The history endpoints are done (2026-09-23). Percentiles that span several rollup rows
-are an approximation the user chose (§7.1, §15).
+## Found in the post-Stage-2 end-to-end test (2026-09-23)
 
-Rollups are done (2026-09-23): hourly buckets, daily partitions created three days
-ahead, retention guarded by the watermark. On first start against the dev database
-it moved 17,532 rows out of `observations_default`. One rollup has run on real data
-(forced with lag 0 for hour 21:00: 878 stop visits in 145 ms); the scheduled one with
-the one-hour lag has not yet been seen live. The schedule
-endpoint was answering 502 for most of that evening; the matcher kept running on
-the stored version, as designed.
+A fresh Compose stack from an empty volume, every endpoint and error path live,
+a restart on existing data, memory, graceful stop. Fixed and committed:
 
-The matcher is done (2026-09-23): **99.67 % live match rate**, ~115 MB for the whole
-timetable in memory. Two things found live and fixed: a 502 from the schedule
-endpoint left the matcher empty (now it publishes the version already active), and
-the §9.1 case-17 warning fired every day (TfNSW's calendar has one service per
-weekday pattern). Matched rows now show early running (down to −16 s), so the
-"never negative" note in "Where we are" applied to unmatched feed delays only.
+- **Rows written before the timetable loaded stayed unmatched for good** — the
+  change filter suppressed their matched version as unchanged. Fixed; regression
+  test fails without it.
+- **Every readiness probe during startup logged an ERROR** (503). 503 no longer
+  gets the extra error line.
+- `/v1/lines` sorted TfNSW's unnamed `RTTA_*` routes first. Now last.
 
-Not every §9.1 edge case has its own subtest yet: 12 (`stop_id` not in `stops`, needs
-a stops lookup and a counter), 14 (duplicate entity — relies on the key), 15 and 16
-(covered by design and by the gtfsstatic tests). The §12 box for that stays open.
+Measured: ready in ~26 s from empty (timetable download 22.5 s), 2 s on restart;
+service 141 MiB and Postgres 300 MiB under Compose; graceful stop in under a
+second with 0 rows lost.
 
-Stage 1 is code-complete (2026-09-23). The two unticked items are the VM and the
-deployed demo, **deferred by the user's choice — not paying yet**. Rows are written
-only while the laptop runs, and history missed is not recoverable; raise it again
-when Stage 2 has something worth showing. `deploy/` is ready: clone to
-`/opt/headway`, put `.env` there with `POSTGRES_PASSWORD`, `make up`.
+## Things that are true and easy to forget
 
-## Completed this session
+- **TfNSW's schedule endpoint returns 502 often.** The loader retries after
+  15 minutes and the matcher keeps the version already in Postgres. An ERROR line
+  for it is real but not an outage.
+- **The feed never sends `stop_sequence`, `start_date`, `direction_id` or a
+  vehicle id.** All of them come from the timetable or not at all.
+- **`REPLACEMENT` (5) is ~15–18 % of updates.** Schedule relationships stay raw
+  integers everywhere.
+- **The dev database's `public` schema has real daily partitions.** Tests that
+  inspect `pg_class` must scope to their own schema (go through
+  `'observations'::regclass`) or they see those too.
+- **The API key is real and in `.env`** (gitignored, mode 0600). It was pasted into
+  an early session transcript; worth rotating if that transcript is shared.
+- `POSTGRES_PASSWORD` in `.env` was generated locally for Compose; the VM gets
+  its own.
 
-Eleven commits. Each component is tested and pushed:
+## Contract decisions the user made (all in §15)
 
-| Package | State | Coverage |
-|---|---|---|
-| `internal/config` | 40 env vars, validated, secrets unprintable | 86.7 % |
-| `internal/feed` | client, account-wide limiter, poller | 88.8 % |
-| `internal/gtfsrt` | decoder, all nil handling | 93.2 % |
-| `internal/ingest` | filter, queue, batch writer | 95.8 % |
-| `internal/store` | pool, migration runner, retry policy | 87.3 % |
-| `cmd/fixturedump` | `capture` and `derive` subcommands | — |
-
-237 tests and subtests, all green under `-race`. Five migrations apply cleanly to
-PostgreSQL 18.6.
-
-## Decisions made this session
-
-These are all in §15 with full reasoning. The ones most likely to be second-guessed:
-
-1. **Observations are keyed on `stop_id`, not `stop_sequence`** (`migrations/0005`).
-   The TfNSW feed never sends `stop_sequence` — measured at 0 of 3,836 updates — so
-   it can only come from the timetable, which an unmatched observation has no access
-   to. The user chose this over a sentinel value. Cost: a loop service revisiting one
-   stop within a single feed timestamp loses the second visit. That is asserted by a
-   test, not left to be discovered.
-2. **The poller calls a `Handler` on its own goroutine** instead of emitting to a
-   channel, contradicting the original §4.2 (which has been updated). §9.4 already
-   puts decode and match on that goroutine.
-3. **The decoder uses `proto.UnmarshalOptions{AllowPartial: true}`.** GTFS-realtime
-   is proto2 with *required* fields, so a strict unmarshal lets one malformed entity
-   destroy a whole 3,939-update response.
-4. **Secrets are a `Secret` type, not a `redact()` helper**, superseding §8.2.
-5. **The rate limiter and daily budget are one hand-rolled object**, not
-   `x/time/rate` plus a counter — both limits are per account and must be answered
-   together. Direct dependencies stayed at three.
-6. **`RawUpdate.TripLevel`** marks a trip-level update. 103 of 488 live entities
-   carry no stop-time updates at all; that is how a cancellation arrives, and without
-   this they decode to nothing.
-
-## What the live feed actually contains
-
-Measured 2026-09-21 and recorded in §9.1. These overturn assumptions in the original
-design, and the matcher depends on them:
-
-- **No `stop_sequence`, ever.** Match order 1 (`trip_id` + `stop_sequence`) can never
-  fire. `trip_id` + `stop_id` is the primary path.
-- **No vehicle id, no direction id.** The `VehicleDescriptor` is present on all 488
-  trip updates and completely empty. `direction_id` will always be `-1` in rollups.
-- **`REPLACEMENT` (5) is 17–18 % of updates.** Not exotic.
-- **44 % of each payload is TfNSW extension fields** the canonical bindings ignore,
-  correctly.
-- Route ids are operational codes (`RTTA`, `ESI`, `IWL`, `APS`, `NSN`…), not `T1`/`T2`.
-  **Check at Stage 2 whether the `sydneytrains` schedule bundle actually contains
-  them** — `IWL` looks like Inner West Light Rail in a feed named for trains, and if
-  the bundle lacks those routes the match rate target will not be met.
-
-## Known issues
-
-- **All rows land in `observations_default`.** No maintenance job exists to
-  pre-create daily partitions, so retention is currently impossible. Expected until
-  `internal/rollup` (Stage 3); §9.3 case 4. It is a paging alert in production.
-- **`INGEST_QUEUE_SIZE` must exceed one poll's updates.** One poll submits ~3,939 in
-  a burst; the default 8,192 leaves ~2× headroom for the trains feed alone. Stage 3
-  adds buses, which is far larger. Re-check then.
-- **`make up`, `make fixtures`, `make loadtest` do not work yet** — they reference
-  `deploy/docker-compose.yml`, live API quota, and Stage 3 respectively.
-- No CI. `.github/workflows/ci.yml` is Stage 2.
-
-## Easy to misunderstand
-
-- **`PROJECT.md` is authoritative, and it is kept true.** If code contradicts it,
-  that is a bug in `PROJECT.md` to be fixed in the same change — not a divergence to
-  live with. Several sections were corrected this session when reality disagreed.
-- **`§7.3` is out of date in three places** (listed under "Contradictions" below).
-  Trust the code there.
-- **`observations.stop_sequence` is nullable now.** The DDL block in §6.2 still shows
-  the original key with a `SUPERSEDED` comment pointing at `migrations/0005`.
-- **Test counts include subtests.** `go test -v | grep -c '=== RUN'` is how the
-  numbers above were produced.
-- **The API key is real and works.** It is in `.env` (gitignored, mode 0600) and was
-  pasted into this session's transcript — worth rotating if that transcript is shared.
-- **`testdata/*_0001.pb` and `*_0002.pb` are 15 seconds apart** and decode to
-  identical core fields. That is not a bad capture: the producer republishes on a
-  15 s header cadence while changing core content far less often.
-
-## Waiting on the user
-
-Not blocking, but Stage 1 cannot finish without the first two:
-
-1. **BinaryLane VM** — Standard 1 GB, Sydney, Ubuntu 24.04, x86-64 (so builds target
-   `linux/amd64`). Replaces Oracle (debit card rejected) and Azure for Students (expiry
-   cliff); §16 q6 and the §15 row of 2026-09-23 have the sizing. Buy it once `main`
-   writes rows, not before — until then the VM would capture nothing.
-   Paste what gets run on the VM so `deploy/vm-bootstrap.md` is written from reality.
-2. **Confirm the TfNSW plan** is the default 60,000/day at 5/s. `FEED_RATE_LIMIT_RPS=4`
-   and `FEED_DAILY_BUDGET=55000` are sized against exactly that.
-3. §16 questions 2–5, 7, 8 have working defaults and block nothing.
-
-## Contradictions between PROJECT.md and the code
-
-Fix these when next touching the area — or now, if the next session prefers a clean
-start:
-
-| §7.3 says | Code does | Why |
-|---|---|---|
-| `StopSequence int32` | `*int32` | Nullable since `migrations/0005`. |
-| `type Filter interface{ Admit(Observation) bool }` | concrete `type Filter struct` | One implementation; an interface would be speculative. |
-| `NewWriter(pool, in, cfg)` | also takes `*slog.Logger` | The writer logs failed batches. |
-
-§5 also omits `internal/ingest/pipeline_integration_test.go`.
+`not_found` code, `summary.early`, `limit` caps, `reasons` beside the envelope;
+history percentiles approximate when combining rows; `status: "cancelled"`.
+Ask before any other change to §7.
