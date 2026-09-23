@@ -23,6 +23,9 @@ type Response struct {
 	Body       []byte
 	FetchedAt  time.Time
 	StatusCode int
+	// LastModified is the response's validator, sent back as If-Modified-Since
+	// on the next schedule download. The realtime feeds never set it.
+	LastModified string
 }
 
 // The outcomes §9.5 requires be told apart. They are sentinels rather than
@@ -138,7 +141,13 @@ func (c *Client) Fetch(ctx context.Context, feedID, url string, cond Conditional
 		if len(body) == 0 {
 			return Response{}, fmt.Errorf("feed %s: %w", feedID, ErrEmptyBody)
 		}
-		return Response{FeedID: feedID, Body: body, FetchedAt: fetchedAt, StatusCode: resp.StatusCode}, nil
+		return Response{
+			FeedID:       feedID,
+			Body:         body,
+			FetchedAt:    fetchedAt,
+			StatusCode:   resp.StatusCode,
+			LastModified: resp.Header.Get("Last-Modified"),
+		}, nil
 
 	case http.StatusNotModified:
 		return Response{}, fmt.Errorf("feed %s: %w", feedID, ErrNotModified)

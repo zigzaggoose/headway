@@ -30,6 +30,7 @@ import (
 	"github.com/zigzaggoose/headway/internal/config"
 	"github.com/zigzaggoose/headway/internal/feed"
 	"github.com/zigzaggoose/headway/internal/gtfsrt"
+	"github.com/zigzaggoose/headway/internal/gtfsstatic"
 	"github.com/zigzaggoose/headway/internal/ingest"
 	"github.com/zigzaggoose/headway/internal/match"
 	"github.com/zigzaggoose/headway/internal/store"
@@ -141,6 +142,20 @@ func main() {
 	client := feed.NewClient(cfg.APIKey, cfg.Poll.HTTPTimeout, time.Now)
 	limiter := feed.NewLimiter(cfg.Poll.RateLimit, cfg.Poll.DailyBudget, time.Now)
 
+	// The schedule gets its own client because its timeout is the schedule's
+	// (§10.1), not a realtime poll's: the bundle is 11 MB. It shares the
+	// limiter, because the quota is per account.
+	schedules := gtfsstatic.NewLoader(db.Pool(), feed.NewClient(cfg.APIKey, 5*time.Minute, time.Now), limiter,
+		cfg.Service.MaxStopTimeS, cfg.Schedule.KeepVersions, time.Now, log)
+	var loader sync.WaitGroup
+	loader.Add(1)
+	go func() {
+		defer loader.Done()
+		schedules.Run(ctx, cfg.Feeds, gtfsstatic.Refresh{
+			Hour: cfg.Schedule.RefreshHour, Minute: cfg.Schedule.RefreshMinute, Interval: cfg.Schedule.RefreshInterval,
+		})
+	}()
+
 	var pollers sync.WaitGroup
 	for _, f := range cfg.Feeds {
 		p := feed.NewPoller(f, client, limiter, decodeAndIngest(log, pipeline, latest, cfg.Service.DayOverlap), feed.PollerOptions{
@@ -169,6 +184,7 @@ func main() {
 	}
 	cancelDrain()
 	pollers.Wait() // step 3: no new observations can be produced
+	loader.Wait()  // an in-flight schedule load has rolled back and let go of the pool
 	// Steps 4 and 5: close the channel and let the writer flush. The grace
 	// is the HTTP one because config already requires it to exceed a flush.
 	if err := pipeline.Close(cfg.HTTP.ShutdownGrace); err != nil {

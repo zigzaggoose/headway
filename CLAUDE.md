@@ -89,7 +89,7 @@ migrations/       NNNN_name.sql, applied in order, checksummed.
 testdata/         recorded .pb fixtures. Tests never call the live API.
 ```
 
-Not yet built: `internal/gtfsstatic`, `internal/rollup`, `internal/obs`, `web/`. §5 is the destination layout. Create a package when its first real file is written — no
+Not yet built: `internal/rollup`, `internal/obs`, `web/`. §5 is the destination layout. Create a package when its first real file is written — no
 placeholder files.
 
 ## Conventions

@@ -34,11 +34,18 @@ clamps early running to zero, because that would bias every on-time percentage.
 
 ## Do this next
 
-**Stage 2, starting with `internal/gtfsstatic`**: download the `sydneytrains` schedule
-bundle, hash, unzip, parse, insert, activate (§9.1, §12 Stage 2). First thing to check
-once it loads: **whether the bundle contains the feed's operational route ids**
-(`RTTA`, `NSN_1a`, `IWL`…). If it does not, the match-rate target cannot be met and
-§9.1 needs a mapping before the matcher is worth writing.
+**`internal/match`: the matcher** (§9.1 orders 1–4, delay reconcile per §9.5). The
+schedule now loads at startup and daily (`internal/gtfsstatic`, 2026-09-23), but
+nothing reads it yet — `match.Unmatched` is still the only path.
+
+What the data says, measured 2026-09-23 (§9.1 table):
+- 99.1 % of live stop updates find their `(trip_id, stop_id)` in the same-day bundle,
+  and route ids need no mapping. The risk flagged earlier is cleared.
+- The feed never sends `start_date`, so the matcher is what picks between the two
+  candidate service dates near midnight — use the calendar and the stop time.
+- **Memory:** the bundle is 1.24 M stop times / 68,738 trips. Hold only trips whose
+  service runs on a candidate date (today, yesterday), and measure RSS on the real
+  bundle before calling it done — the VM has 1 GB shared with Postgres.
 
 Stage 1 is code-complete (2026-09-23). The two unticked items are the VM and the
 deployed demo, **deferred by the user's choice — not paying yet**. Rows are written

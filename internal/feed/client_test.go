@@ -76,6 +76,24 @@ func TestFetch_Conditional_SendsValidators(t *testing.T) {
 	}
 }
 
+// The schedule download sends this back as If-Modified-Since the next day, so
+// losing it would re-download 10.7 MB daily for nothing.
+func TestFetch_OK_ReturnsTheLastModifiedValidator(t *testing.T) {
+	const lm = "Tue, 22 Sep 2026 15:01:13 GMT"
+	c, srv := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Last-Modified", lm)
+		w.Write([]byte("zip"))
+	}, time.Second)
+
+	resp, err := c.Fetch(context.Background(), "sydneytrains", srv.URL, Conditional{})
+	if err != nil {
+		t.Fatalf("fetch: %v", err)
+	}
+	if resp.LastModified != lm {
+		t.Errorf("LastModified = %q, want %q", resp.LastModified, lm)
+	}
+}
+
 // The status cases §11.2 requires, including the two 403s that differ only by
 // a header and mean opposite things.
 func TestFetch_StatusCases(t *testing.T) {
