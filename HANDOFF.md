@@ -32,14 +32,14 @@ clamps early running to zero, because that would bias every on-time percentage.
 
 ## Do this next
 
-**`internal/cache`** — the latest-state cache behind `/v1/lines/{id}/now`.
+**`internal/api`** — `/v1/lines/{id}/now` over `internal/cache` (done 2026-09-23, wired
+into `main`, nothing reads it yet), plus `/healthz` and `/readyz`.
 
 The BinaryLane VM is deferred by the user's choice (2026-09-23) — not paying yet.
 Rows are being written locally, but nothing captures while the laptop is off, and
 that history is not recoverable. Raise it again when `deploy/` is ready.
 
-Then Stage 1's remaining items: `internal/api` (`/v1/lines/{id}/now`,
-`/healthz`, `/readyz`), the full §9.4 shutdown order, `deploy/`, the VM.
+Then Stage 1's remaining items: the HTTP drain step of §9.4, `deploy/`, the VM.
 
 ## Completed this session
 

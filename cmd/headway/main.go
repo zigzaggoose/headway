@@ -22,6 +22,7 @@ import (
 	_ "time/tzdata"
 
 	"github.com/zigzaggoose/headway"
+	"github.com/zigzaggoose/headway/internal/cache"
 	"github.com/zigzaggoose/headway/internal/config"
 	"github.com/zigzaggoose/headway/internal/feed"
 	"github.com/zigzaggoose/headway/internal/gtfsrt"
@@ -89,6 +90,7 @@ func main() {
 		FilterMaxEntries: cfg.Ingest.FilterMaxEntries,
 	}, log)
 	pipeline.Start()
+	latest := cache.New(cfg.HTTP.CacheTTL, time.Now)
 
 	// Shutdown is ordered and the order matters (§9.4): cancel the pollers,
 	// then wait for every producer to return, and only then close what they
@@ -103,7 +105,7 @@ func main() {
 
 	var pollers sync.WaitGroup
 	for _, f := range cfg.Feeds {
-		p := feed.NewPoller(f, client, limiter, decodeAndIngest(log, pipeline, cfg.Service.DayOverlap), feed.PollerOptions{
+		p := feed.NewPoller(f, client, limiter, decodeAndIngest(log, pipeline, latest, cfg.Service.DayOverlap), feed.PollerOptions{
 			Interval: cfg.Poll.Interval,
 			Jitter:   cfg.Poll.Jitter,
 			Now:      time.Now,
@@ -141,9 +143,11 @@ func main() {
 }
 
 // decodeAndIngest decodes and converts on the poller's goroutine (§9.4), then
-// hands each observation to the pipeline, which never blocks. It reports at
+// publishes the poll to the latest-state cache and hands each observation to
+// the pipeline. The cache takes every observation, before the change filter,
+// because "unchanged since the last write" still means "current". It reports at
 // debug because a line per poll is far above the rate §10.2 allows for info.
-func decodeAndIngest(log *slog.Logger, pipeline *ingest.Pipeline, overlap time.Duration) feed.Handler {
+func decodeAndIngest(log *slog.Logger, pipeline *ingest.Pipeline, latest *cache.Cache, overlap time.Duration) feed.Handler {
 	return func(_ context.Context, r feed.Response) {
 		decoded, err := gtfsrt.Decode(r.FeedID, r.Body, r.FetchedAt)
 		if err != nil {
@@ -153,6 +157,7 @@ func decodeAndIngest(log *slog.Logger, pipeline *ingest.Pipeline, overlap time.D
 			return
 		}
 		obs, skipped := match.Unmatched(decoded.Updates, overlap)
+		latest.Update(r.FeedID, decoded.HeaderTS, obs)
 		queued := 0
 		for _, o := range obs {
 			if pipeline.Submit(o) {
