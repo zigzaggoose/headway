@@ -132,6 +132,8 @@ func main() {
 			},
 			OnTime:          cfg.OnTime,
 			ReadyMaxFeedAge: cfg.HTTP.ReadyMaxFeedAge,
+			History:         db.History,
+			HistoryMaxDays:  cfg.HTTP.HistoryMaxDays,
 			Now:             time.Now,
 			Log:             log,
 		}),

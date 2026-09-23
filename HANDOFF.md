@@ -34,16 +34,19 @@ clamps early running to zero, because that would bias every on-time percentage.
 
 ## Do this next
 
-**History endpoints**: `/v1/stops/{id}/history` and `/v1/lines/{id}/history` over
-`otp_*_hourly` (§7.1), then `/v1/lines`, `/v1/stops/{id}/now`, `/v1/admin/stats`, CI,
-README (§12 Stage 2). These are §7 contract work: the shapes are specified, but ask
-before deviating from them.
+**`/v1/lines`, `/v1/stops/{id}/now`, `/v1/admin/stats`** (§7.1), then CI and the README
+(§12 Stage 2). These are §7 contract work: the shapes are specified; ask before
+deviating. `/v1/lines/{id}/now` still decides "known route" from the live feed — with
+the schedule now loaded it should use `routes` (Stage 1 note in §7.1).
+
+The history endpoints are done (2026-09-23). Percentiles that span several rollup rows
+are an approximation the user chose (§7.1, §15).
 
 Rollups are done (2026-09-23): hourly buckets, daily partitions created three days
 ahead, retention guarded by the watermark. On first start against the dev database
-it moved 17,532 rows out of `observations_default`. **The rollup has not yet been
-seen doing real work live** — every row was newer than the one-hour lag at the time.
-Check `otp_route_hourly` after the next run of more than two hours. The schedule
+it moved 17,532 rows out of `observations_default`. One rollup has run on real data
+(forced with lag 0 for hour 21:00: 878 stop visits in 145 ms); the scheduled one with
+the one-hour lag has not yet been seen live. The schedule
 endpoint was answering 502 for most of that evening; the matcher kept running on
 the stored version, as designed.
 

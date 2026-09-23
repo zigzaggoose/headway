@@ -11,6 +11,7 @@ import (
 
 	"github.com/zigzaggoose/headway/internal/cache"
 	"github.com/zigzaggoose/headway/internal/config"
+	"github.com/zigzaggoose/headway/internal/store"
 )
 
 // Options is everything the handlers read. Ping is a function rather than
@@ -19,6 +20,8 @@ type Options struct {
 	Cache           *cache.Cache
 	Ping            func(context.Context) error
 	ScheduleLoaded  func() bool // true once any feed's timetable is in the matcher
+	History         func(context.Context, store.HistoryQuery) (store.History, error)
+	HistoryMaxDays  int
 	OnTime          config.Thresholds
 	ReadyMaxFeedAge time.Duration
 	Now             func() time.Time
@@ -35,6 +38,8 @@ func NewHandler(o Options) http.Handler {
 	mux.HandleFunc("GET /healthz", s.healthz)
 	mux.HandleFunc("GET /readyz", s.readyz)
 	mux.HandleFunc("GET /v1/lines/{route_id}/now", s.lineNow)
+	mux.HandleFunc("GET /v1/lines/{route_id}/history", s.lineHistory)
+	mux.HandleFunc("GET /v1/stops/{stop_id}/history", s.stopHistory)
 	// Without this the mux answers unknown paths in plain text, and §7.2 says
 	// every non-2xx response carries the envelope.
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {

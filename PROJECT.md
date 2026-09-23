@@ -791,7 +791,9 @@ Hourly on-time performance for a stop, from `otp_stop_hourly`.
 | `direction` | `0` / `1` | both | Filter. |
 | `bucket` | `hour` / `day` | `hour` | `day` aggregates hourly rows server-side. |
 
-Range is capped at `HISTORY_MAX_DAYS` (default 90); exceeding it is `400 range_too_large`.
+Range is capped at `HISTORY_MAX_DAYS` (default 90); exceeding it is `400 range_too_large`. A bare `YYYY-MM-DD` means midnight in Sydney. `route_id` in the response is `null` unless the filter was given. `404 stop_not_found` means the stop is in no active schedule version; `503 not_ready` means no schedule is loaded at all.
+
+**How values combine.** Counts sum. `on_time_pct` is `n_on_time` over the visits that have a delay — early, on time, late, very late — so cancellations are excluded (§16 q4); it is `null` when no visit has one. `delay_mean_s` is the mean weighted by those same visits, which is exact. **`delay_p50_s` and `delay_p90_s` are exact only when a value comes from a single rollup row** (one stop, route, direction and hour). Where a value spans several — a stop served by more than one route, `bucket=day`, and `totals` — they are the median of the rows' own percentiles weighted by visits with a delay: an approximation, chosen by the user on 2026-09-23 over nulls or storing histograms (§15). Day buckets are Sydney calendar days.
 
 ```
 GET /v1/stops/2000341/history?from=2026-09-20&to=2026-09-21&route_id=T1-EXAMPLE
@@ -823,7 +825,7 @@ GET /v1/stops/2000341/history?from=2026-09-20&to=2026-09-21&route_id=T1-EXAMPLE
 
 #### `GET /v1/lines/{route_id}/history`
 
-Same shape as the stop history, reading `otp_route_hourly`, without `stop_id`.
+Same shape as the stop history, reading `otp_route_hourly`, without `stop_id` or `name`: it carries `route_id` and the route's `short_name` instead, and has no `route_id` filter. `404 line_not_found` means the route is in no active schedule version.
 
 #### `GET /v1/admin/stats`
 
@@ -1497,7 +1499,7 @@ Each stage ends in something that runs and can be demonstrated. **Stage 2 is the
 - [x] `internal/match`: schedule cache with atomic swap; resolution orders 1–4; delay derivation per §9.4's reconcile rule. 94.7 % covered. The whole bundle in memory costs ~115 MB RSS (31 MB → 146 MB, measured live).
 - [ ] Every §9.1 edge case has a named subtest and passes.
 - [x] `migrations/0003`: rollup tables; `internal/rollup` hourly job with the retention guard. Two bugs in §6.3's SQL found and fixed before they ran (§15); the 17,532 dev rows stranded in `observations_default` moved into a daily partition on first start.
-- [ ] `/v1/stops/{id}/history` and `/v1/lines/{id}/history`.
+- [x] `/v1/stops/{id}/history` and `/v1/lines/{id}/history`. Live 2026-09-23 on the first real rollup (878 stop visits, 145 ms): T8 (`APS_1a`) at 21:00, 65 visits, 100 % on time, mean delay 1.1 s.
 - [ ] `/v1/lines`, `/v1/stops/{id}/now`, `/v1/admin/stats`.
 - [ ] `.github/workflows/ci.yml` complete including the Postgres service container and the amd64 cross-compile.
 - [x] Match rate measured and recorded. If below 90 %, fix before moving on. **99.67 %** live on 2026-09-23 (≈2,700 full matches, 7 trip-only, 9 unknown trips per poll; 10 ADDED excluded).
@@ -1739,6 +1741,7 @@ Append-only. To reverse a decision, add a row that names the one it supersedes.
 | 2026-09-23 | The schedule read-back lives in `gtfsstatic` (`Loader.Schedule`), not `store.LoadSchedule` as §7.3 had it, and the refresh loop publishes the active version to the matcher after every attempt, including a failed download. The whole bundle is held in memory. | `ingest` imports `store` and `match` imports `ingest`, so `store` importing `match` is a cycle; the loader already owns the timetable tables' SQL. On 2026-09-23 the schedule endpoint answered 502 at startup and the matcher stayed empty despite an active version in Postgres — a regression test now covers it. Holding every trip costs ~115 MB, measured; filtering to candidate dates would need re-filtering at midnight, and 146 MB total leaves room beside Postgres on 1 GB. | A new package just for the schedule types; publishing only after a successful download; filtering trips by calendar at build time (revisit if the VM runs short of memory). |
 | 2026-09-23 | §9.1 case 17's warning fires when **no** service runs on the load date, superseding "fewer than 50 %". | TfNSW defines one service per weekday pattern: on Wednesday 2026-09-23 only 14.7 % of the bundle's services ran, so the 50 % rule warned every day on a healthy bundle. Zero is the actual signature of a calendar that no longer covers today. | A lower fraction (still a guess about the producer's service structure). |
 | 2026-09-23 | The rollup takes each stop visit's last observation over all its rows and then buckets it, stores `max(service_date)` rather than grouping on it, lags the newest hour by one hour, and runs in one transaction with the watermark. Partition creation moves rows already in `observations_default` into a standalone table and attaches it. Retention drops a partition only if it has no row at or past the watermark. `rollup` gets a filter-expiry function rather than the pipeline. | §6.3's query counted early predictions in the wrong hour and would have failed every midnight with `ON CONFLICT DO UPDATE command cannot affect row a second time` — the regression test reproduces that exact error against the old grouping. Without the move, the first start on any database that ran before this job existed fails to create today's partition. "No row past the watermark" is exact where "service date before the watermark's date" is not, since a service day's rows run into the next morning. | Taking the final observation per hour (§6.3 as written); a service-date-only retention guard; `DETACH`ing the default partition to move rows (locks writes for longer); passing `*ingest.Pipeline` to rollup (breaks §4.2's boundary). |
+| 2026-09-23 | History responses combine rollup rows in the API: counts, `on_time_pct` and the mean exactly, and p50/p90 as the visit-weighted median of the rows' percentiles whenever a value spans more than one row. The store returns raw hourly rows plus the stop's or route's name from the active version; route history carries `short_name` where stop history carries `name`. | Chosen by the user from three options. Percentiles are not combinable, and a stop without a route filter, every day bucket, and every total spans several rows; nulls there would leave most answers without a percentile. Keeping the grouping in Go keeps one simple indexed query per request and puts all the arithmetic where it is unit-tested. | Null percentiles whenever rows combine; storing a delay histogram per rollup row (exact to the bin, but a migration and more storage); aggregating in SQL (percentiles would still need the same approximation). |
 
 ---
 
