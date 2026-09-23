@@ -9,6 +9,14 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
+// AllRoutes is the route_id of the rollup rows that count every visit to a
+// stop in an hour, whatever its route. The rollup computes them from raw
+// observations, so their percentiles are exact, and stop history without a
+// filter reads one row an hour instead of one per route and direction: at
+// Central that was ~24,000 rows for 30 days, ~100 ms a request under load
+// (docs/loadtest.md).
+const AllRoutes = "~all"
+
 // HistoryQuery selects rollup rows for one stop or one route. StopID empty
 // means a route history, with RouteID as its subject rather than a filter.
 type HistoryQuery struct {
@@ -64,29 +72,31 @@ func (s *Store) History(ctx context.Context, q HistoryQuery) (History, error) {
 	}
 	h.Known = true
 
-	// Optional filters as "$n IS NULL OR ...", so one statement serves every
-	// combination and each is still answered from the (subject, bucket_start)
-	// index.
-	var rows pgx.Rows
-	var route *string
-	if q.RouteID != "" {
-		route = &q.RouteID
+	// Each filter combination is its own statement rather than one with
+	// "$n IS NULL OR ..." clauses: a prepared statement's generic plan
+	// estimates those at one row and chose nested loops that took 13 s on
+	// 24,000 rows (measured under load, docs/loadtest.md).
+	table, where, args := "otp_route_hourly", "route_id = $1", []any{q.RouteID, q.From, q.To}
+	if q.StopID != "" {
+		table, where, args = "otp_stop_hourly", "stop_id = $1", []any{q.StopID, q.From, q.To}
+		if q.RouteID == "" && q.Direction == nil {
+			where += " AND route_id = '" + AllRoutes + "'"
+		} else {
+			where += " AND route_id <> '" + AllRoutes + "'"
+			if q.RouteID != "" {
+				args = append(args, q.RouteID)
+				where += fmt.Sprintf(" AND route_id = $%d", len(args))
+			}
+		}
+	}
+	if q.Direction != nil {
+		args = append(args, *q.Direction)
+		where += fmt.Sprintf(" AND direction_id = $%d", len(args))
 	}
 	const cols = `bucket_start, n_obs, n_early, n_on_time, n_late, n_very_late, n_skipped, n_cancelled, delay_p50_s, delay_p90_s, delay_mean_s`
-	if q.StopID != "" {
-		rows, err = s.pool.Query(ctx, `
-			SELECT `+cols+` FROM otp_stop_hourly
-			WHERE stop_id = $1 AND bucket_start >= $2 AND bucket_start < $3
-			  AND ($4::text IS NULL OR route_id = $4)
-			  AND ($5::smallint IS NULL OR direction_id = $5)
-			ORDER BY bucket_start`, q.StopID, q.From, q.To, route, q.Direction)
-	} else {
-		rows, err = s.pool.Query(ctx, `
-			SELECT `+cols+` FROM otp_route_hourly
-			WHERE route_id = $1 AND bucket_start >= $2 AND bucket_start < $3
-			  AND ($4::smallint IS NULL OR direction_id = $4)
-			ORDER BY bucket_start`, q.RouteID, q.From, q.To, q.Direction)
-	}
+	rows, err := s.pool.Query(ctx, `SELECT `+cols+` FROM `+table+`
+		WHERE `+where+` AND bucket_start >= $2 AND bucket_start < $3
+		ORDER BY bucket_start`, args...)
 	if err != nil {
 		return History{}, fmt.Errorf("history %q: %w", subject, err)
 	}

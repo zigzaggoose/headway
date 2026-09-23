@@ -570,3 +570,22 @@ func TestMatch_ScheduledAt_IsTheTimetableTimeOnTheServiceDate(t *testing.T) {
 		}
 	})
 }
+
+// §12 Stage 3: a worker pool between decode and match is built only if the
+// poller goroutine is the bottleneck. This is the whole of a poll's work on
+// the goroutine for the largest enabled feed, against its 15 s budget.
+func BenchmarkPoll_DecodeAndMatch_RecordedTrains(b *testing.B) {
+	body, err := os.ReadFile(filepath.Join("..", "..", "testdata", "sydneytrains_tripupdate_0001.pb"))
+	if err != nil {
+		b.Fatalf("read fixture: %v", err)
+	}
+	m := matcher(true)
+	b.ReportAllocs()
+	for b.Loop() {
+		d, err := gtfsrt.Decode(feedID, body, time.Date(2026, 9, 21, 2, 38, 26, 0, time.UTC))
+		if err != nil {
+			b.Fatal(err)
+		}
+		m.Match(feedID, d.Updates)
+	}
+}

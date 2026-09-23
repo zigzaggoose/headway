@@ -324,8 +324,11 @@ func TestTick_RunsEveryStepAndExpiresTheFilter(t *testing.T) {
 	if n := h.count(t, `SELECT count(*) FROM pg_inherits WHERE inhparent = 'observations'::regclass AND inhrelid::regclass::text LIKE 'observations_2026_09_%'`); n != 5 {
 		t.Errorf("%d daily partitions, want yesterday through three days ahead", n)
 	}
-	if n := h.count(t, `SELECT count(*) FROM otp_stop_hourly`); n != 1 {
+	if n := h.count(t, `SELECT count(*) FROM otp_stop_hourly WHERE route_id <> '~all'`); n != 1 {
 		t.Errorf("%d stop buckets, want 1", n)
+	}
+	if n := h.count(t, `SELECT count(*) FROM otp_stop_hourly WHERE route_id = '~all'`); n != 1 {
+		t.Errorf("%d all-routes stop buckets, want 1", n)
 	}
 	if !expired.Equal(date(22)) {
 		t.Errorf("filter expired before %s, want yesterday", expired.Format(time.DateOnly))
@@ -413,5 +416,32 @@ func TestDropPartitionsBefore_UsesTheScheduledHour(t *testing.T) {
 	dropped, err := h.job.DropPartitionsBefore(ctx, date(13))
 	if err != nil || len(dropped) != 0 {
 		t.Errorf("dropped %v (err %v); the 10th has a visit scheduled after the watermark", dropped, err)
+	}
+}
+
+// The all-routes row is computed from the visits, not from the per-route rows,
+// so its percentiles are exact where combining rows could only approximate.
+func TestRollup_AllRoutesRow_HasExactPercentilesAcrossRoutes(t *testing.T) {
+	h := newHarness(t, sydney(12, 0))
+	// Stop A at 08:00: route R has delays 0 and 10; route Q has 100, 200, 300.
+	for i, v := range []int32{0, 10} {
+		h.insert(t, row{serviceDate: date(23), trip: fmt.Sprintf("R%d", i), stop: "A", route: "R", delay: d(v), feedTS: sydney(8, 10), scheduledAt: sched(8, 10)})
+	}
+	for i, v := range []int32{100, 200, 300} {
+		h.insert(t, row{serviceDate: date(23), trip: fmt.Sprintf("Q%d", i), stop: "A", route: "Q", delay: d(v), feedTS: sydney(8, 20), scheduledAt: sched(8, 20)})
+	}
+
+	h.rollup(t)
+
+	var n, p50, p90 int
+	if err := h.pool.QueryRow(context.Background(),
+		`SELECT n_obs, delay_p50_s, delay_p90_s FROM otp_stop_hourly WHERE stop_id = 'A' AND route_id = '~all' AND bucket_start = $1`,
+		sydney(8, 0)).Scan(&n, &p50, &p90); err != nil {
+		t.Fatalf("read all-routes row: %v", err)
+	}
+	// Over 0, 10, 100, 200, 300: the median is 100 and the 90th is 300. The
+	// per-route rows alone (R p50 0, Q p50 200) could not give 100.
+	if n != 5 || p50 != 100 || p90 != 300 {
+		t.Errorf("all routes: n %d p50 %d p90 %d; want 5, 100, 300", n, p50, p90)
 	}
 }

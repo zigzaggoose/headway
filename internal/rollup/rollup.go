@@ -8,6 +8,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/zigzaggoose/headway/internal/servicetime"
+	"github.com/zigzaggoose/headway/internal/store"
 )
 
 // Result is what one rollup did.
@@ -127,6 +128,22 @@ func (j *Job) Rollup(ctx context.Context) (Result, error) {
 			return fmt.Errorf("roll up stops: %w", err)
 		}
 		res.StopRows = tag.RowsAffected()
+
+		// One more row per stop and hour counting every route, computed from
+		// the visits themselves so its percentiles are exact. Stop history
+		// reads these when it is not filtered, instead of combining one row
+		// per route and direction (store.AllRoutes).
+		tag, err = tx.Exec(ctx, `
+			INSERT INTO otp_stop_hourly (bucket_start, service_date, stop_id, route_id, direction_id, `+cols+`)
+			SELECT date_trunc('hour', bucket_ts, 'UTC'), max(service_date), stop_id, $4, -1, `+counts+`
+			FROM final
+			GROUP BY 1, 3
+			ON CONFLICT (bucket_start, stop_id, route_id, direction_id) DO UPDATE SET `+update,
+			t.EarlyS, t.LateS, t.VeryLateS, store.AllRoutes)
+		if err != nil {
+			return fmt.Errorf("roll up stops across routes: %w", err)
+		}
+		res.StopRows += tag.RowsAffected()
 
 		tag, err = tx.Exec(ctx, `
 			INSERT INTO otp_route_hourly (bucket_start, service_date, route_id, direction_id, `+cols+`)

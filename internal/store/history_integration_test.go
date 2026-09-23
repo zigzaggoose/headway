@@ -42,14 +42,15 @@ func TestHistory_ReadsRollupsForTheSubjectAndFilters(t *testing.T) {
 		hour      int
 		stop, rte string
 		dir       int16
-	}{{9, "S1", "R1", 0}, {8, "S1", "R1", 1}, {8, "S1", "R2", 0}, {8, "S2", "R1", 0}, {30, "S1", "R1", 0}} {
+	}{{9, "S1", "R1", 0}, {8, "S1", "R1", 1}, {8, "S1", "R2", 0}, {8, "S2", "R1", 0}, {30, "S1", "R1", 0},
+		{8, "S1", AllRoutes, -1}, {9, "S1", AllRoutes, -1}} {
 		b := day.Add(time.Duration(r.hour) * time.Hour)
 		if _, err := s.pool.Exec(ctx, `
 			INSERT INTO otp_stop_hourly (bucket_start, service_date, stop_id, route_id, direction_id, n_obs, n_early, n_on_time, n_late, n_very_late, n_skipped, n_cancelled, delay_p50_s)
 			VALUES ($1, $2, $3, $4, $5, 3, 0, 3, 0, 0, 0, 0, 12)`, b, day, r.stop, r.rte, r.dir); err != nil {
 			t.Fatalf("insert stop row: %v", err)
 		}
-		if r.stop == "S1" {
+		if r.stop == "S1" && r.rte != AllRoutes {
 			if _, err := s.pool.Exec(ctx, `
 				INSERT INTO otp_route_hourly (bucket_start, service_date, route_id, direction_id, n_obs, n_early, n_on_time, n_late, n_very_late, n_skipped, n_cancelled)
 				VALUES ($1, $2, $3, $4, 3, 0, 3, 0, 0, 0, 0) ON CONFLICT DO NOTHING`, b, day, r.rte, r.dir); err != nil {
@@ -62,8 +63,15 @@ func TestHistory_ReadsRollupsForTheSubjectAndFilters(t *testing.T) {
 	if !h.ScheduleLoaded || !h.Known || h.Name != "Central" {
 		t.Fatalf("stop S1: %+v", h)
 	}
-	if len(h.Rows) != 3 || !h.Rows[0].BucketStart.Equal(day.Add(8*time.Hour)) || !h.Rows[2].BucketStart.Equal(day.Add(9*time.Hour)) {
-		t.Errorf("stop rows = %+v; want the three in range, oldest first, and not S2's or the next day's", h.Rows)
+	// Unfiltered, a stop's history is its all-routes rows: one an hour.
+	if len(h.Rows) != 2 || !h.Rows[0].BucketStart.Equal(day.Add(8*time.Hour)) || !h.Rows[1].BucketStart.Equal(day.Add(9*time.Hour)) {
+		t.Errorf("stop rows = %+v; want the two all-routes rows in range, oldest first", h.Rows)
+	}
+	onlyDir := week
+	zero := int16(0)
+	onlyDir.Direction = &zero
+	if n := len(q(onlyDir).Rows); n != 2 {
+		t.Errorf("direction filter alone: %d rows, want the two per-route rows with direction 0 and never the all-routes rows", n)
 	}
 	if h.Rows[0].P50 == nil || *h.Rows[0].P50 != 12 || h.Rows[0].NOnTime != 3 {
 		t.Errorf("row values = %+v", h.Rows[0])
