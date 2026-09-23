@@ -1,10 +1,14 @@
 package api
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"net/http"
+	"slices"
 	"time"
+
+	"github.com/zigzaggoose/headway/internal/match"
 )
 
 // healthz is liveness only. It checks nothing, because a Postgres outage
@@ -44,4 +48,97 @@ func (s *server) readyz(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ready"})
+}
+
+type adminStats struct {
+	Schedules     []adminSchedule       `json:"active_schedule_versions"`
+	Feeds         []adminFeed           `json:"feeds"`
+	RequestsToday int                   `json:"requests_today"`
+	Ingest        adminIngest           `json:"ingest"`
+	Match         map[string]adminMatch `json:"match_last_poll"`
+	Maintenance   adminMaintenance      `json:"maintenance"`
+}
+
+type adminSchedule struct {
+	FeedID    string `json:"feed_id"`
+	VersionID int64  `json:"version_id"`
+	TripCount int    `json:"trip_count"`
+}
+
+type adminFeed struct {
+	FeedID   string `json:"feed_id"`
+	FeedTS   string `json:"feed_ts"`
+	FeedAgeS int64  `json:"feed_age_s"`
+}
+
+type adminIngest struct {
+	QueueLen   int    `json:"queue_len"`
+	QueueCap   int    `json:"queue_cap"`
+	Admitted   uint64 `json:"admitted"`
+	Suppressed uint64 `json:"suppressed"`
+	Dropped    uint64 `json:"dropped"`
+	Written    uint64 `json:"written"`
+	Failed     uint64 `json:"failed"`
+	Conflicts  uint64 `json:"conflicts"`
+	FilterSize int    `json:"filter_size"`
+}
+
+type adminMatch struct {
+	MatchRate float64      `json:"match_rate"`
+	Counts    match.Counts `json:"counts"`
+}
+
+type adminMaintenance struct {
+	OldestPartition *string `json:"oldest_partition"`
+	Partitions      int     `json:"partitions"`
+	DefaultRows     int64   `json:"default_partition_rows"`
+	RollupWatermark string  `json:"rollup_watermark"`
+	DatabaseBytes   int64   `json:"database_bytes"`
+}
+
+// adminStats is the operator's view (§7.1). It is not a public contract: it
+// reports what exists, and changes freely as the service does.
+func (s *server) adminStats(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), handlerTimeout)
+	defer cancel()
+	m, err := s.Maintenance(ctx)
+	if err != nil {
+		s.Log.Error("admin stats query failed", "component", "api", "request_id", requestID(r.Context()), "err", err.Error())
+		writeError(w, r, http.StatusInternalServerError, "internal", "internal error")
+		return
+	}
+
+	out := adminStats{
+		Schedules:     []adminSchedule{},
+		Feeds:         []adminFeed{},
+		RequestsToday: s.RequestsToday(),
+		Match:         map[string]adminMatch{},
+		Maintenance: adminMaintenance{
+			Partitions:      m.Partitions,
+			DefaultRows:     m.DefaultRows,
+			RollupWatermark: m.Watermark.UTC().Format(time.RFC3339),
+			DatabaseBytes:   m.DatabaseBytes,
+		},
+	}
+	if m.OldestPartition != nil {
+		d := m.OldestPartition.Format(time.DateOnly)
+		out.Maintenance.OldestPartition = &d
+	}
+	for _, sch := range s.Schedules() {
+		out.Schedules = append(out.Schedules, adminSchedule{FeedID: sch.FeedID, VersionID: sch.VersionID, TripCount: sch.Trips()})
+	}
+	for id, ts := range s.Cache.Feeds() {
+		out.Feeds = append(out.Feeds, adminFeed{FeedID: id, FeedTS: rfc3339(ts), FeedAgeS: sinceSeconds(s.Now(), ts)})
+	}
+	slices.SortFunc(out.Schedules, func(a, b adminSchedule) int { return cmp.Compare(a.FeedID, b.FeedID) })
+	slices.SortFunc(out.Feeds, func(a, b adminFeed) int { return cmp.Compare(a.FeedID, b.FeedID) })
+	for id, c := range s.MatchCounts() {
+		out.Match[id] = adminMatch{MatchRate: c.MatchRate(), Counts: c}
+	}
+	p := s.PipelineStats()
+	out.Ingest = adminIngest{
+		QueueLen: p.QueueLen, QueueCap: p.QueueCap, Admitted: p.Admitted, Suppressed: p.Suppressed,
+		Dropped: p.Dropped, Written: p.Written, Failed: p.Failed, Conflicts: p.Conflicts, FilterSize: p.FilterSize,
+	}
+	writeJSON(w, http.StatusOK, out)
 }

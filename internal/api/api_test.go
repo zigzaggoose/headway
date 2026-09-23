@@ -15,7 +15,29 @@ import (
 	"github.com/zigzaggoose/headway/internal/cache"
 	"github.com/zigzaggoose/headway/internal/config"
 	"github.com/zigzaggoose/headway/internal/ingest"
+	"github.com/zigzaggoose/headway/internal/match"
 )
+
+// fixtureSchedule is feed "trains": routes R1 (T1) and R2 (T2), stops s1 to
+// s9, and trip-a on R1 calling at s1 at 11:10 and s2 at 11:20 on its service
+// date. Observations only get a scheduled time when they carry a sequence.
+func fixtureSchedule() *match.Schedule {
+	s := match.NewSchedule(41, "trains")
+	s.AddRoute("R1", match.Route{ShortName: "T1", LongName: "North Shore", Type: 2})
+	s.AddRoute("R2", match.Route{ShortName: "T2", LongName: "Inner West", Type: 2})
+	s.AddRoute("F1", match.Route{ShortName: "F1", LongName: "Manly", Type: 4})
+	for _, id := range []string{"s1", "s2", "s3", "s5", "s7", "s9"} {
+		s.AddStop(id, "Stop "+id)
+	}
+	s.AddTrip("trip-a", match.Trip{RouteID: "R1", ServiceID: "X", Headsign: "Emu Plains"})
+	s.AddStopTime("trip-a", match.StopTime{Seq: 1, StopID: "s1", ArrS: 11*3600 + 600, DepS: 11*3600 + 600})
+	s.AddStopTime("trip-a", match.StopTime{Seq: 2, StopID: "s2", ArrS: 11*3600 + 1200, DepS: match.NoTime})
+	s.AddTrip("trip-b", match.Trip{RouteID: "R2", ServiceID: "X", Headsign: "Liverpool"})
+	s.AddStopTime("trip-b", match.StopTime{Seq: 4, StopID: "s1", ArrS: 11*3600 + 300, DepS: 11*3600 + 300})
+	s.AddTrip("trip-c", match.Trip{RouteID: "R1", ServiceID: "X", Headsign: "Hornsby"})
+	s.AddStopTime("trip-c", match.StopTime{Seq: 1, StopID: "s1", ArrS: 13 * 3600, DepS: 13 * 3600})
+	return s
+}
 
 // 11:04:12 AEST. Feed timestamps below are a few seconds before it.
 var now = time.Date(2026, 9, 23, 1, 4, 12, 0, time.UTC)
@@ -55,6 +77,7 @@ func newHarness(t *testing.T, ping error, feeds ...[]ingest.Observation) harness
 			Cache:           c,
 			Ping:            func(context.Context) error { return ping },
 			ScheduleLoaded:  func() bool { return true },
+			Schedules:       func() []*match.Schedule { return []*match.Schedule{fixtureSchedule()} },
 			OnTime:          thresholds,
 			ReadyMaxFeedAge: 120 * time.Second,
 			Now:             func() time.Time { return now },
@@ -246,7 +269,7 @@ func TestLineNow_BadInput_ReturnsTheEnvelope(t *testing.T) {
 		{"a non-numeric direction is rejected", "/v1/lines/R1/now?direction=up", 400, "invalid_parameter"},
 		{"a zero limit is rejected", "/v1/lines/R1/now?limit=0", 400, "invalid_parameter"},
 		{"a limit above 1000 is rejected", "/v1/lines/R1/now?limit=1001", 400, "invalid_parameter"},
-		{"a route not in the live feed is not found", "/v1/lines/R9/now", 404, "line_not_found"},
+		{"a route not in the schedule is not found", "/v1/lines/R9/now", 404, "line_not_found"},
 		{"an unknown path is not found", "/v1/nope", 404, "not_found"},
 	}
 	h := newHarness(t, nil, []ingest.Observation{obs("R1", "trip-a", "s1", ptr(int32(0)), nil, 0)})
@@ -265,6 +288,7 @@ func TestStatus_Boundaries_MatchTheRollupSQL(t *testing.T) {
 		want  string
 	}{
 		{nil, "unknown"},
+		{ptr(int32(0)), "on_time"},
 		{ptr(int32(-61)), "early"},
 		{ptr(int32(-60)), "on_time"},
 		{ptr(int32(300)), "on_time"},
@@ -273,9 +297,12 @@ func TestStatus_Boundaries_MatchTheRollupSQL(t *testing.T) {
 		{ptr(int32(901)), "very_late"},
 	}
 	for _, c := range cases {
-		if got := s.status(c.delay); got != c.want {
+		if got := s.status(c.delay, 0); got != c.want {
 			t.Errorf("status(%v) = %s, want %s", c.delay, got, c.want)
 		}
+	}
+	if got := s.status(ptr(int32(0)), tripRelCanceled); got != "cancelled" {
+		t.Errorf("a cancelled trip's status = %s, want cancelled whatever its delay", got)
 	}
 }
 

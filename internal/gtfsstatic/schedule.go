@@ -32,6 +32,31 @@ func (l *Loader) Schedule(ctx context.Context, feedID string) (*match.Schedule, 
 		}
 		sched = match.NewSchedule(version, feedID)
 
+		if err := each(ctx, tx, `SELECT route_id, coalesce(short_name, ''), coalesce(long_name, ''), route_type FROM routes WHERE version_id = $1`,
+			version, func(r pgx.Rows) error {
+				var id string
+				var rt match.Route
+				if err := r.Scan(&id, &rt.ShortName, &rt.LongName, &rt.Type); err != nil {
+					return err
+				}
+				sched.AddRoute(id, rt)
+				return nil
+			}); err != nil {
+			return fmt.Errorf("routes: %w", err)
+		}
+
+		if err := each(ctx, tx, `SELECT stop_id, name FROM stops WHERE version_id = $1`,
+			version, func(r pgx.Rows) error {
+				var id, name string
+				if err := r.Scan(&id, &name); err != nil {
+					return err
+				}
+				sched.AddStop(id, name)
+				return nil
+			}); err != nil {
+			return fmt.Errorf("stops: %w", err)
+		}
+
 		if err := each(ctx, tx, `SELECT trip_id, route_id, service_id, direction_id, coalesce(headsign, '') FROM trips WHERE version_id = $1`,
 			version, func(r pgx.Rows) error {
 				var id string

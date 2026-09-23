@@ -185,3 +185,38 @@ func TestNewest_AcrossFeeds_IsTheLatestFeedTimestamp(t *testing.T) {
 		t.Errorf("newest = %s, want %s", got, t0)
 	}
 }
+
+func TestStop_AfterUpdate_ReturnsEveryCallAtTheStop(t *testing.T) {
+	c := New(45*time.Minute, fixedClock(t0))
+	c.Update("trains", t0, []ingest.Observation{
+		obs("trains", "R1", "trip-a", "stop-2", 60, t0),
+		obs("trains", "R1", "trip-a", "stop-3", 90, t0),
+		obs("trains", "R2", "trip-b", "stop-3", 0, t0),
+	})
+
+	calls, asOf, found := c.Stop("stop-3")
+
+	if !found || !asOf.Equal(t0) || len(calls) != 2 {
+		t.Fatalf("found %v as of %s with %d calls, want 2", found, asOf, len(calls))
+	}
+	if calls[0].TripID != "trip-a" || *calls[0].DelayS != 90 || calls[1].RouteID != "R2" {
+		t.Errorf("calls = %+v", calls)
+	}
+	if _, _, found := c.Stop("nowhere"); found {
+		t.Error("a stop no feed reports was found")
+	}
+	stale := New(45*time.Minute, fixedClock(t0.Add(time.Hour)))
+	stale.Update("trains", t0, []ingest.Observation{obs("trains", "R1", "trip-a", "stop-2", 60, t0)})
+	if _, _, found := stale.Stop("stop-2"); found {
+		t.Error("a stop from a feed past the TTL was served")
+	}
+}
+
+func TestFeeds_ReportsEachFeedsLatestTimestamp(t *testing.T) {
+	c := New(45*time.Minute, fixedClock(t0))
+	c.Update("trains", t0, nil)
+	c.Update("metro", t0.Add(-time.Minute), nil)
+	if f := c.Feeds(); len(f) != 2 || !f["metro"].Equal(t0.Add(-time.Minute)) {
+		t.Errorf("feeds = %v", f)
+	}
+}

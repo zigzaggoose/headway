@@ -106,6 +106,11 @@ func main() {
 	}, log)
 	pipeline.Start()
 	latest := cache.New(cfg.HTTP.CacheTTL, time.Now)
+	// One client and one limiter for every feed: the connection pool is worth
+	// sharing, and both the rate limit and the daily quota are per account.
+	client := feed.NewClient(cfg.APIKey, cfg.Poll.HTTPTimeout, time.Now)
+	limiter := feed.NewLimiter(cfg.Poll.RateLimit, cfg.Poll.DailyBudget, time.Now)
+
 	matcher := match.NewMatcher(feedIDs(cfg), match.Options{
 		DayOverlap:    cfg.Service.DayOverlap,
 		DateTolerance: cfg.Service.DateTolerance,
@@ -132,8 +137,13 @@ func main() {
 			},
 			OnTime:          cfg.OnTime,
 			ReadyMaxFeedAge: cfg.HTTP.ReadyMaxFeedAge,
+			Schedules:       matcher.Schedules,
 			History:         db.History,
 			HistoryMaxDays:  cfg.HTTP.HistoryMaxDays,
+			PipelineStats:   pipeline.Stats,
+			MatchCounts:     matcher.LastCounts,
+			RequestsToday:   limiter.Used,
+			Maintenance:     db.Maintenance,
 			Now:             time.Now,
 			Log:             log,
 		}),
@@ -152,11 +162,6 @@ func main() {
 		}
 	}()
 	log.Info("http listening", "component", "main", "addr", ln.Addr().String())
-
-	// One client and one limiter for every feed: the connection pool is worth
-	// sharing, and both the rate limit and the daily quota are per account.
-	client := feed.NewClient(cfg.APIKey, cfg.Poll.HTTPTimeout, time.Now)
-	limiter := feed.NewLimiter(cfg.Poll.RateLimit, cfg.Poll.DailyBudget, time.Now)
 
 	// The schedule gets its own client because its timeout is the schedule's
 	// (§10.1), not a realtime poll's: the bundle is 11 MB. It shares the

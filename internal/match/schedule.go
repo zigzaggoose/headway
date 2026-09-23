@@ -23,6 +23,13 @@ type Trip struct {
 	Stops       []StopTime
 }
 
+// Route is what the API shows about a route.
+type Route struct {
+	ShortName string
+	LongName  string
+	Type      int16 // GTFS route_type
+}
+
 type service struct {
 	days       [7]bool // indexed by time.Weekday, so Sunday is 0
 	start, end string  // YYYY-MM-DD, inclusive; "" when only calendar_dates names the service
@@ -39,6 +46,8 @@ type Schedule struct {
 
 	trips    map[string]*Trip
 	services map[string]*service
+	routes   map[string]Route
+	stops    map[string]string // stop_id → name
 	// Every stop_id string appears in thousands of stop times. Interning
 	// keeps one copy of each instead of one allocation per row; on the
 	// Sydney Trains bundle that is 1,215 strings instead of 1.24 million.
@@ -52,8 +61,39 @@ func NewSchedule(versionID int64, feedID string) *Schedule {
 		FeedID:    feedID,
 		trips:     make(map[string]*Trip),
 		services:  make(map[string]*service),
+		routes:    make(map[string]Route),
+		stops:     make(map[string]string),
 		stopIDs:   make(map[string]string),
 	}
+}
+
+// AddRoute records a route.
+func (s *Schedule) AddRoute(routeID string, r Route) { s.routes[routeID] = r }
+
+// AddStop records a stop's name.
+func (s *Schedule) AddStop(stopID, name string) { s.stops[stopID] = name }
+
+// Route returns a route by id.
+func (s *Schedule) Route(routeID string) (Route, bool) {
+	r, ok := s.routes[routeID]
+	return r, ok
+}
+
+// Routes calls fn for every route, in no particular order.
+func (s *Schedule) Routes(fn func(id string, r Route)) {
+	for id, r := range s.routes {
+		fn(id, r)
+	}
+}
+
+// hasStops is false for a schedule built without stops.txt, where every
+// stop_id would otherwise look unknown.
+func (s *Schedule) hasStops() bool { return len(s.stops) > 0 }
+
+// Stop returns a stop's name by id.
+func (s *Schedule) Stop(stopID string) (string, bool) {
+	n, ok := s.stops[stopID]
+	return n, ok
 }
 
 // AddTrip adds a trip with no stops yet.

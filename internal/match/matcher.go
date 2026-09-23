@@ -30,6 +30,8 @@ type Counts struct {
 	NoStopID           int // unkeyable: no stop_id and no resolvable stop_sequence
 	BadStartDate       int // unreadable start_date; skipped rather than guessed (§9.2 case 7)
 	DelayDisagreements int // delay and time disagreed beyond tolerance; delay won (§9.5)
+	UnknownStop        int // stop_id not in the timetable's stops; still stored (§9.1 case 12)
+	Duplicates         int // a later update for the same key in one message replaced an earlier one (§9.1 case 14)
 }
 
 // MatchRate is the share of trip-matched updates among those that could
@@ -56,14 +58,22 @@ type Options struct {
 type Matcher struct {
 	opts      Options
 	schedules map[string]*atomic.Pointer[Schedule]
+	// last is each feed's most recent Counts, for /v1/admin/stats. Pollers
+	// write it and the API reads it, so it is atomic like the schedules.
+	last map[string]*atomic.Pointer[Counts]
 }
 
 // NewMatcher returns a matcher for a fixed set of feeds. The map is never
 // written after this, so only the pointers need to be atomic.
 func NewMatcher(feedIDs []string, o Options) *Matcher {
-	m := &Matcher{opts: o, schedules: make(map[string]*atomic.Pointer[Schedule], len(feedIDs))}
+	m := &Matcher{
+		opts:      o,
+		schedules: make(map[string]*atomic.Pointer[Schedule], len(feedIDs)),
+		last:      make(map[string]*atomic.Pointer[Counts], len(feedIDs)),
+	}
 	for _, id := range feedIDs {
 		m.schedules[id] = new(atomic.Pointer[Schedule])
+		m.last[id] = new(atomic.Pointer[Counts])
 	}
 	return m
 }
@@ -74,6 +84,18 @@ func (m *Matcher) Swap(s *Schedule) {
 	if p, ok := m.schedules[s.FeedID]; ok {
 		p.Store(s)
 	}
+}
+
+// Schedules returns every schedule in use, for the API to read. Schedules are
+// immutable, so the caller may keep and read them without a lock.
+func (m *Matcher) Schedules() []*Schedule {
+	var out []*Schedule
+	for _, p := range m.schedules {
+		if s := p.Load(); s != nil {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 // Loaded returns the version in use for a feed, or 0 when none is.
@@ -96,8 +118,26 @@ func (m *Matcher) Match(feedID string, updates []gtfsrt.RawUpdate) ([]ingest.Obs
 	}
 	c := Counts{Updates: len(updates)}
 	out := make([]ingest.Observation, 0, len(updates))
+	// §9.1 case 14: the same trip twice in one message means the last word
+	// wins. Left to the database, ON CONFLICT DO NOTHING would keep the
+	// first instead, so duplicates are resolved here, in place.
+	at := make(map[ingest.Key]int, len(updates))
+	add := func(o ingest.Observation) {
+		if i, ok := at[o.Key()]; ok {
+			out[i] = o
+			c.Duplicates++
+			return
+		}
+		at[o.Key()] = len(out)
+		out = append(out, o)
+	}
 
 	for _, u := range updates {
+		if sched != nil && u.StopID != "" && sched.hasStops() {
+			if _, ok := sched.stops[u.StopID]; !ok {
+				c.UnknownStop++
+			}
+		}
 		cands, ok := m.candidates(u)
 		if !ok {
 			c.BadStartDate++
@@ -126,7 +166,7 @@ func (m *Matcher) Match(feedID string, updates []gtfsrt.RawUpdate) ([]ingest.Obs
 			default:
 				c.UnknownTrip++
 			}
-			out = append(out, base(u, cands[0]))
+			add(base(u, cands[0]))
 			continue
 		}
 
@@ -145,7 +185,7 @@ func (m *Matcher) Match(feedID string, updates []gtfsrt.RawUpdate) ([]ingest.Obs
 				o.StopSequence = seqOf(st)
 				o.ArrivalDelayS, o.DepartureDelayS, o.ObservedDelayS = nil, nil, nil
 				matched(&o, trip)
-				out = append(out, o)
+				add(o)
 				c.CancelledStops++
 			}
 			continue
@@ -163,7 +203,7 @@ func (m *Matcher) Match(feedID string, updates []gtfsrt.RawUpdate) ([]ingest.Obs
 			}
 			o := base(u, m.pickDate(sched, trip, cands, reference(u), NoTime))
 			matched(&o, trip)
-			out = append(out, o)
+			add(o)
 			continue
 		}
 
@@ -184,10 +224,25 @@ func (m *Matcher) Match(feedID string, updates []gtfsrt.RawUpdate) ([]ingest.Obs
 			c.DelayDisagreements++
 		}
 		o.ObservedDelayS = observed(o.ArrivalDelayS, o.DepartureDelayS)
-		out = append(out, o)
+		add(o)
 	}
 	c.Observations = len(out)
+	if p, ok := m.last[feedID]; ok {
+		snapshot := c
+		p.Store(&snapshot)
+	}
 	return out, c
+}
+
+// LastCounts returns each feed's counts from its most recent poll.
+func (m *Matcher) LastCounts() map[string]Counts {
+	out := make(map[string]Counts, len(m.last))
+	for id, p := range m.last {
+		if c := p.Load(); c != nil {
+			out[id] = *c
+		}
+	}
+	return out
 }
 
 // candidates is the producer's start_date when present, which §9.2 case 7

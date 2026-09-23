@@ -291,8 +291,8 @@ func TestLoad_BadBundle_LeavesTheActiveVersionAndNoOrphans(t *testing.T) {
 		}, "stop_times.txt line 3"},
 		{"no trips is refused", map[string]string{"trips.txt": "route_id,service_id,trip_id\n"}, "refusing to activate an empty timetable"},
 		{"no calendar of either kind is refused", map[string]string{"calendar.txt": ""}, "neither calendar.txt nor calendar_dates.txt"},
-		{"a required file missing is refused", map[string]string{"stops.txt": ""}, "has no stops.txt"},
-		{"a body that is not a zip is refused", nil, "open schedule zip"},
+		{"a required file missing is refused (§9.1 case 16)", map[string]string{"stops.txt": ""}, "has no stops.txt"},
+		{"a body that is not a zip is refused (§9.1 case 16)", nil, "open schedule zip"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -459,6 +459,12 @@ func TestSchedule_ReadBack_RoundTripsTheActiveVersion(t *testing.T) {
 	}
 	if second := trip.Stops[1]; second.Seq != 20 || second.ArrS != 90600 || second.DepS != 90660 {
 		t.Errorf("second call = %+v", second)
+	}
+	if r, ok := s.Route("APS_1a"); !ok || r.Type != 2 {
+		t.Errorf("route = %+v, found %v", r, ok)
+	}
+	if name, ok := s.Stop("B"); !ok || name != "Beta" {
+		t.Errorf("stop B = %q, found %v", name, ok)
 	}
 	wed := time.Date(2026, 9, 23, 0, 0, 0, 0, time.UTC)
 	if !s.RunsOn("SVC", wed) || s.RunsOn("SVC", wed.AddDate(0, 0, 1)) || s.RunsOn("SVC", wed.AddDate(0, 0, 7)) {

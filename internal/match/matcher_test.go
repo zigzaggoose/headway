@@ -449,3 +449,85 @@ func deref(p *int32) any {
 }
 
 func unsafeData(s string) *byte { return unsafe.StringData(s) }
+
+func TestMatch_RemainingEdgeCases(t *testing.T) {
+	t.Run("gaps in the stops sent are not interpolated (§9.1 case 10)", func(t *testing.T) {
+		m := matcher(true)
+		obs, c := m.Match(feedID, []gtfsrt.RawUpdate{update("T-1", "A", at(7, 50)), update("T-1", "C", at(7, 50))})
+		if len(obs) != 2 || c.FullMatch != 2 {
+			t.Errorf("got %d observations, counts %+v; want exactly the two stops sent, nothing for B", len(obs), c)
+		}
+	})
+	t.Run("a stop_id missing from stops.txt is still stored, and counted (§9.1 case 12)", func(t *testing.T) {
+		s := schedule()
+		s.AddStop("A", "Alpha")
+		m := NewMatcher([]string{feedID}, opts)
+		m.Swap(s)
+		o, c := one(t, m, update("T-1", "Z", at(8, 5)))
+		if o.StopID != "Z" || c.UnknownStop != 1 {
+			t.Errorf("stop %q, counts %+v", o.StopID, c)
+		}
+		if _, c := one(t, m, update("T-1", "A", at(8, 0))); c.UnknownStop != 0 {
+			t.Errorf("a known stop was counted unknown: %+v", c)
+		}
+	})
+	t.Run("no direction anywhere is stored as unknown (§9.1 case 13)", func(t *testing.T) {
+		s := NewSchedule(1, feedID)
+		s.AddTrip("T", Trip{RouteID: "R", ServiceID: "X"})
+		s.AddStopTime("T", StopTime{1, "A", 3600, 3600})
+		m := NewMatcher([]string{feedID}, opts)
+		m.Swap(s)
+		if o, _ := one(t, m, update("T", "A", at(1, 0))); o.DirectionID != nil {
+			t.Errorf("direction = %d, want nil (the rollup turns it into -1)", *o.DirectionID)
+		}
+	})
+	t.Run("the same stop twice in one message: the last one wins (§9.1 case 14)", func(t *testing.T) {
+		m := matcher(true)
+		first, last := update("T-1", "B", at(8, 5)), update("T-1", "B", at(8, 5))
+		first.DepartureDelay, last.DepartureDelay = ptr(int32(30)), ptr(int32(240))
+		obs, c := m.Match(feedID, []gtfsrt.RawUpdate{first, update("T-1", "A", at(8, 5)), last})
+		if len(obs) != 2 || c.Duplicates != 1 {
+			t.Fatalf("got %d observations, counts %+v", len(obs), c)
+		}
+		if obs[0].StopID != "B" || *obs[0].ObservedDelayS != 240 {
+			t.Errorf("kept %s at %d, want B at the later 240", obs[0].StopID, *obs[0].ObservedDelayS)
+		}
+	})
+	t.Run("one poll is matched against one schedule, even across a swap (§9.1 case 15)", func(t *testing.T) {
+		m := matcher(true)
+		ups := make([]gtfsrt.RawUpdate, 500)
+		for i := range ups {
+			ups[i] = update("T-1", "A", at(8, 0))
+			ups[i].TripID = "T-1"
+		}
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			m.Swap(NewSchedule(99, feedID)) // an empty schedule: nothing would match
+		}()
+		_, c := m.Match(feedID, ups)
+		<-done
+		if c.FullMatch != 0 && c.UnknownTrip != 0 {
+			t.Errorf("one poll saw both schedules: %+v", c)
+		}
+	})
+}
+
+// /v1/admin/stats reads the last counts while pollers write them.
+func TestMatcher_LastCounts_ReadWhileMatchingIsRaceFree(t *testing.T) {
+	m := matcher(true)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for range 200 {
+			m.Match(feedID, []gtfsrt.RawUpdate{update("T-1", "A", at(8, 0))})
+		}
+	}()
+	for range 200 {
+		_ = m.LastCounts()
+	}
+	<-done
+	if c := m.LastCounts()[feedID]; c.FullMatch != 1 || c.Updates != 1 {
+		t.Errorf("last counts = %+v, want the final poll's", c)
+	}
+}

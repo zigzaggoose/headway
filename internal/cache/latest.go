@@ -23,8 +23,23 @@ type Trip struct {
 	TripRel     int32
 	Matched     bool
 	NextStopID  string
+	NextStopSeq *int32 // from the timetable; nil when unmatched
 	DelayS      *int32
 	LastUpdate  time.Time
+}
+
+// Call is one trip's reported call at one stop: every stop the producer still
+// lists for a trip is one it has not yet served.
+type Call struct {
+	FeedID      string
+	TripID      string
+	RouteID     string
+	ServiceDate time.Time
+	StopSeq     *int32 // from the timetable; nil when unmatched
+	DelayS      *int32
+	StopTimeRel int32
+	TripRel     int32
+	Matched     bool
 }
 
 // snapshot is one feed's trips at one feed timestamp. It is never modified
@@ -32,6 +47,7 @@ type Trip struct {
 type snapshot struct {
 	feedTS  time.Time
 	byRoute map[string][]Trip
+	byStop  map[string][]Call
 }
 
 // Cache is safe for concurrent use: pollers update it, HTTP handlers read it.
@@ -58,10 +74,21 @@ func New(ttl time.Duration, now func() time.Time) *Cache {
 // snapshot is built before the lock is taken, so readers wait only for a
 // map assignment.
 func (c *Cache) Update(feedID string, feedTS time.Time, obs []ingest.Observation) {
-	s := &snapshot{feedTS: feedTS, byRoute: make(map[string][]Trip)}
+	s := &snapshot{feedTS: feedTS, byRoute: make(map[string][]Trip), byStop: make(map[string][]Call)}
 	type tripKey struct{ serviceDate, tripID string }
 	seen := make(map[tripKey]bool)
 	for _, o := range obs {
+		s.byStop[o.StopID] = append(s.byStop[o.StopID], Call{
+			FeedID:      o.FeedID,
+			TripID:      o.TripID,
+			RouteID:     o.RouteID,
+			ServiceDate: o.ServiceDate,
+			StopSeq:     o.StopSequence,
+			DelayS:      o.ObservedDelayS,
+			StopTimeRel: o.StopTimeRel,
+			TripRel:     o.TripRel,
+			Matched:     o.Matched,
+		})
 		// The first observation of a trip is its next stop; the rest are
 		// further down the line.
 		k := tripKey{o.ServiceDate.Format(time.DateOnly), o.TripID}
@@ -79,6 +106,7 @@ func (c *Cache) Update(feedID string, feedTS time.Time, obs []ingest.Observation
 			TripRel:     o.TripRel,
 			Matched:     o.Matched,
 			NextStopID:  o.StopID,
+			NextStopSeq: o.StopSequence,
 			DelayS:      o.ObservedDelayS,
 			LastUpdate:  o.FeedTS,
 		})
@@ -119,6 +147,46 @@ func (c *Cache) Route(routeID string) (trips []Trip, asOf time.Time, found bool)
 		found = true
 	}
 	return trips, asOf, found
+}
+
+// Stop returns the calls at stopID across every fresh feed, and the oldest
+// feed timestamp among the feeds that report the stop. found is false when no
+// fresh feed does. The returned slice is the caller's to keep.
+func (c *Cache) Stop(stopID string) (calls []Call, asOf time.Time, found bool) {
+	c.mu.RLock()
+	snaps := make([]*snapshot, 0, len(c.feeds))
+	for _, s := range c.feeds {
+		snaps = append(snaps, s)
+	}
+	c.mu.RUnlock()
+
+	now := c.now()
+	for _, s := range snaps {
+		if now.Sub(s.feedTS) > c.ttl {
+			continue
+		}
+		cs, ok := s.byStop[stopID]
+		if !ok {
+			continue
+		}
+		calls = append(calls, cs...)
+		if !found || s.feedTS.Before(asOf) {
+			asOf = s.feedTS
+		}
+		found = true
+	}
+	return calls, asOf, found
+}
+
+// Feeds returns each feed's latest snapshot timestamp.
+func (c *Cache) Feeds() map[string]time.Time {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	out := make(map[string]time.Time, len(c.feeds))
+	for id, s := range c.feeds {
+		out[id] = s.feedTS
+	}
+	return out
 }
 
 // Newest returns the most recent feed timestamp across all feeds, or the zero

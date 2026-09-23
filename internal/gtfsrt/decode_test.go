@@ -335,7 +335,7 @@ func TestDecode_SparseMessages_DoNotPanic(t *testing.T) {
 			wantDropping: true,
 		},
 		{
-			name: "a scheduled stop with neither arrival nor departure says nothing",
+			name: "a scheduled stop with neither arrival nor departure says nothing (§9.1 case 6)",
 			entity: &gtfs.FeedEntity{Id: proto.String("e5"), TripUpdate: &gtfs.TripUpdate{
 				Trip: &gtfs.TripDescriptor{TripId: proto.String("trip-1")},
 				StopTimeUpdate: []*gtfs.TripUpdate_StopTimeUpdate{

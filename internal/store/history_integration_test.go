@@ -90,3 +90,33 @@ func TestHistory_ReadsRollupsForTheSubjectAndFilters(t *testing.T) {
 		t.Error("a stop only in an inactive version was reported known")
 	}
 }
+
+func TestMaintenance_ReportsPartitionsDefaultRowsAndWatermark(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+	if _, err := s.Migrate(ctx, embedded(t)); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	m, err := s.Maintenance(ctx)
+	if err != nil {
+		t.Fatalf("maintenance: %v", err)
+	}
+	if m.OldestPartition != nil || m.Partitions != 0 || m.DefaultRows != 0 || m.DatabaseBytes == 0 {
+		t.Errorf("fresh database: %+v", m)
+	}
+	for _, sql := range []string{
+		`CREATE TABLE observations_2026_09_21 PARTITION OF observations FOR VALUES FROM ('2026-09-21') TO ('2026-09-22')`,
+		`CREATE TABLE observations_2026_09_20 PARTITION OF observations FOR VALUES FROM ('2026-09-20') TO ('2026-09-21')`,
+		`INSERT INTO observations (service_date, feed_id, trip_id, stop_id, feed_ts, trip_rel, stop_time_rel, matched) VALUES ('2026-10-30', 'f', 't', 's', now(), 0, 0, false)`,
+	} {
+		if _, err := s.pool.Exec(ctx, sql); err != nil {
+			t.Fatalf("%s: %v", sql, err)
+		}
+	}
+	if m, err = s.Maintenance(ctx); err != nil {
+		t.Fatalf("maintenance: %v", err)
+	}
+	if m.Partitions != 2 || m.OldestPartition == nil || m.OldestPartition.Format(time.DateOnly) != "2026-09-20" || m.DefaultRows != 1 {
+		t.Errorf("maintenance = %+v", m)
+	}
+}
