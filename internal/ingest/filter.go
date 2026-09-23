@@ -57,6 +57,11 @@ type entry struct {
 	hasDelay    bool
 	stopTimeRel int32
 	tripRel     int32
+	// matched decides route, direction and stop_sequence, all of which a
+	// query sees. Without it, a row written before the timetable loaded
+	// stayed unmatched for good: the matched version of the same delay was
+	// suppressed as unchanged (found live 2026-09-23).
+	matched     bool
 	serviceDate string
 	seq         uint64
 }
@@ -80,6 +85,7 @@ func (f *Filter) Admit(o Observation) bool {
 	now := entry{
 		stopTimeRel: o.StopTimeRel,
 		tripRel:     o.TripRel,
+		matched:     o.Matched,
 		serviceDate: k.ServiceDate,
 	}
 	if o.ObservedDelayS != nil {
@@ -109,7 +115,7 @@ func (f *Filter) Admit(o Observation) bool {
 // see. A status change always counts: a trip becoming cancelled is the most
 // important thing the feed ever says, and its delay may not move at all.
 func changed(prev, now entry, minDelta int32) bool {
-	if prev.stopTimeRel != now.stopTimeRel || prev.tripRel != now.tripRel {
+	if prev.stopTimeRel != now.stopTimeRel || prev.tripRel != now.tripRel || prev.matched != now.matched {
 		return true
 	}
 	if prev.hasDelay != now.hasDelay {

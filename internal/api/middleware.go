@@ -56,9 +56,12 @@ func (s *server) middleware(next http.Handler) http.Handler {
 					writeError(rec, r, http.StatusInternalServerError, "internal", "internal error")
 				}
 			}
-			if rec.status >= 500 {
+			if rec.status >= 500 && rec.status != http.StatusServiceUnavailable {
 				// §10.2: a 5xx also gets an error line, so the request id a
-				// client reports leads straight to it.
+				// client reports leads straight to it. Not a 503: that is
+				// not_ready, the expected answer to every readiness probe
+				// while the timetable loads, and logging it at ERROR buried
+				// real errors in a startup's worth of noise.
 				s.Log.Error("request failed", "component", "api", "request_id", id, "status", rec.status)
 			}
 			s.Log.Info("http request",

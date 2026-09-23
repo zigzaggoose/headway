@@ -218,3 +218,21 @@ func TestFilter_ConcurrentAdmits_AreCountedExactlyOnce(t *testing.T) {
 		t.Errorf("admitted=%d entries=%d, want 2000 each", f.Stats().Admitted, f.Stats().Entries)
 	}
 }
+
+// Regression, found live 2026-09-23: the first poll after startup is written
+// before the timetable loads, so unmatched. When the same delay later arrives
+// matched, it must be written, or the row stays unmatched for good.
+func TestFilter_BecomingMatched_IsAChange(t *testing.T) {
+	f := NewFilter(0, 100)
+	o := obs("trip-1", "stop-1", i32(0))
+	if !f.Admit(o) {
+		t.Fatal("first sighting was suppressed")
+	}
+	o.Matched = true
+	if !f.Admit(o) {
+		t.Error("the matched version of an unchanged delay was suppressed")
+	}
+	if f.Admit(o) {
+		t.Error("an unchanged matched observation was admitted twice")
+	}
+}

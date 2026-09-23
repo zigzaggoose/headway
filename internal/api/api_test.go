@@ -26,6 +26,7 @@ func fixtureSchedule() *match.Schedule {
 	s.AddRoute("R1", match.Route{ShortName: "T1", LongName: "North Shore", Type: 2})
 	s.AddRoute("R2", match.Route{ShortName: "T2", LongName: "Inner West", Type: 2})
 	s.AddRoute("F1", match.Route{ShortName: "F1", LongName: "Manly", Type: 4})
+	s.AddRoute("RTTA_DEF", match.Route{Type: 2})
 	for _, id := range []string{"s1", "s2", "s3", "s5", "s7", "s9"} {
 		s.AddStop(id, "Stop "+id)
 	}
@@ -350,5 +351,20 @@ func TestMiddleware_EveryRequest_WritesOneAccessLogLine(t *testing.T) {
 	}
 	if !strings.Contains(h.log.String(), `"status":200`) {
 		t.Errorf("access log lacks the status:\n%s", h.log)
+	}
+}
+
+// A 503 is "not ready yet", which every probe during startup gets. It is
+// logged as a request, not as an error.
+func TestMiddleware_NotReady_IsNotAnErrorLine(t *testing.T) {
+	var buf bytes.Buffer
+	h := harness{h: NewHandler(Options{
+		Cache: cache.New(time.Hour, func() time.Time { return now }), Ping: func(context.Context) error { return nil },
+		ScheduleLoaded: func() bool { return false }, ReadyMaxFeedAge: time.Minute,
+		Now: func() time.Time { return now }, Log: slog.New(slog.NewJSONHandler(&buf, nil)),
+	})}
+	rec, _ := h.get(t, "/readyz")
+	if rec.Code != 503 || strings.Contains(buf.String(), `"level":"ERROR"`) {
+		t.Errorf("status %d, log:\n%s", rec.Code, buf.String())
 	}
 }

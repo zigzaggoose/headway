@@ -230,12 +230,25 @@ func (s *server) lines(w http.ResponseWriter, r *http.Request) {
 			}
 		})
 	}
+	// By short name, as a rider reads them (T1, T2 ...), with the routes that
+	// have none — TfNSW's empty-train RTTA_* routes — last rather than first.
 	slices.SortFunc(resp.Lines, func(a, b lineRow) int {
-		return cmp.Or(cmp.Compare(a.ShortName, b.ShortName), cmp.Compare(a.RouteID, b.RouteID))
+		return cmp.Or(
+			cmp.Compare(unnamed(a), unnamed(b)),
+			cmp.Compare(a.ShortName, b.ShortName),
+			cmp.Compare(a.RouteID, b.RouteID))
 	})
 	resp.Lines = resp.Lines[:min(limit, len(resp.Lines))]
 	resp.Count = len(resp.Lines)
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// unnamed is 1 for a route with no short name, so it sorts after named ones.
+func unnamed(l lineRow) int {
+	if l.ShortName == "" {
+		return 1
+	}
+	return 0
 }
 
 func (s *server) lineNow(w http.ResponseWriter, r *http.Request) {

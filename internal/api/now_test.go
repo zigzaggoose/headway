@@ -46,11 +46,15 @@ func TestLines_ListsTheScheduleRoutes(t *testing.T) {
 
 	_, body := h.get(t, "/v1/lines")
 	lines := body["lines"].([]any)
-	if body["count"] != 3.0 || body["schedule_version_id"] != 41.0 || len(lines) != 3 {
+	if body["count"] != 4.0 || body["schedule_version_id"] != 41.0 || len(lines) != 4 {
 		t.Fatalf("got %v", body)
 	}
 	if first := lines[0].(map[string]any); first["route_id"] != "F1" || first["route_type"] != 4.0 || first["feed_id"] != "trains" || first["long_name"] != "Manly" {
 		t.Errorf("first line = %v; want sorted by short name", first)
+	}
+
+	if last := lines[3].(map[string]any); last["route_id"] != "RTTA_DEF" {
+		t.Errorf("last line = %v; a route with no short name sorts last", last)
 	}
 
 	_, body = h.get(t, "/v1/lines?mode=2&limit=1")
