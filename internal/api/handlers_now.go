@@ -39,14 +39,16 @@ type nowSummary struct {
 }
 
 type nowTrip struct {
-	TripID      string  `json:"trip_id"`
-	ServiceDate string  `json:"service_date"`
-	VehicleID   string  `json:"vehicle_id,omitempty"`
-	Headsign    string  `json:"headsign,omitempty"`
-	TripRel     int32   `json:"trip_rel"`
-	Matched     bool    `json:"matched"`
-	NextStop    nowStop `json:"next_stop"`
-	LastUpdate  string  `json:"last_update"`
+	TripID      string   `json:"trip_id"`
+	ServiceDate string   `json:"service_date"`
+	VehicleID   string   `json:"vehicle_id,omitempty"`
+	Headsign    string   `json:"headsign,omitempty"`
+	Start       *tripEnd `json:"start"`
+	End         *tripEnd `json:"end"`
+	TripRel     int32    `json:"trip_rel"`
+	Matched     bool     `json:"matched"`
+	NextStop    nowStop  `json:"next_stop"`
+	LastUpdate  string   `json:"last_update"`
 }
 
 type nowStop struct {
@@ -139,18 +141,9 @@ func (t timetable) call(feedID, tripID string, seq *int32, d time.Time) (headsig
 		return trip.Headsign, nil
 	}
 	for _, st := range trip.Stops {
-		if st.Seq != *seq {
-			continue
+		if st.Seq == *seq {
+			return trip.Headsign, at(st, d)
 		}
-		secs := st.DepS
-		if secs == match.NoTime {
-			secs = st.ArrS
-		}
-		if secs == match.NoTime {
-			break
-		}
-		at := servicetime.AtServiceOffset(d, int(secs))
-		return trip.Headsign, &at
 	}
 	return trip.Headsign, nil
 }
@@ -306,11 +299,14 @@ func (s *server) lineNow(w http.ResponseWriter, r *http.Request) {
 	for _, tr := range trips[:min(limit, len(trips))] {
 		headsign, scheduled := t.call(tr.FeedID, tr.TripID, tr.NextStopSeq, tr.ServiceDate)
 		name, _ := t.stopName(tr.NextStopID) // "" for a stop the timetable lacks, which omits the field
+		start, end := t.ends(tr.FeedID, tr.TripID, tr.ServiceDate)
 		resp.Trips = append(resp.Trips, nowTrip{
 			TripID:      tr.TripID,
 			ServiceDate: tr.ServiceDate.Format(time.DateOnly),
 			VehicleID:   tr.VehicleID,
 			Headsign:    headsign,
+			Start:       start,
+			End:         end,
 			TripRel:     tr.TripRel,
 			Matched:     tr.Matched,
 			NextStop: nowStop{

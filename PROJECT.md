@@ -747,6 +747,8 @@ Errors: `404 line_not_found` if `route_id` is absent from the active schedule. `
 
 **Since Stage 2 (2026-09-23), superseding the Stage 1 note that stood here:** a route is known iff it is in a loaded timetable, so a real line with nothing running is `200` with no trips, and no timetable at all is `503 not_ready`. `next_stop` is the first stop the feed still reports for the trip; `stop_sequence`, `scheduled` and `predicted` are `null` when the observation is unmatched, and `predicted` is `scheduled + delay_s`. `status` is `early`, `on_time`, `late`, `very_late`, `unknown` (no delay) or **`cancelled`** (a cancelled trip, whatever its delay says — chosen by the user, §15). `as_of` and `feed_age_s` come from the newest feed when the route has no trips, and are `null` before the first poll. `vehicle_id` and `headsign` are omitted when empty.
 
+**Since 2026-09-24:** each trip also carries `start` and `end`, its first and last timetabled stop as `{ "stop_id", "name", "scheduled" }`, so a client can label a trip by when and where it runs; both are `null` for an unmatched trip. `service_date` is what `GET /v1/trips/{trip_id}` needs.
+
 #### `GET /v1/stops/{stop_id}/now`
 
 Upcoming departures at a stop with live delay.
@@ -829,6 +831,27 @@ GET /v1/stops/2000341/history?from=2026-09-20&to=2026-09-21&route_id=T1-EXAMPLE
 #### `GET /v1/lines/{route_id}/history`
 
 Same shape as the stop history, reading `otp_route_hourly`, without `stop_id` or `name`: it carries `route_id` and the route's `short_name` instead, and has no `route_id` filter. `404 line_not_found` means the route is in no active schedule version.
+
+#### `GET /v1/trips/{trip_id}`
+
+Every timetabled stop of one trip on one service date, each with the **last** delay the feed gave for it: final at a stop the trip has left, the current prediction at one it has not reached. Reads `observations` (one primary-key range scan), so it sees stops `/now` has already dropped as served; it therefore answers only within `RETENTION_DAYS`.
+
+Query params: `service_date` (required, `YYYY-MM-DD`, as `/now` reports it).
+
+```json
+{
+  "trip_id": "…", "service_date": "2026-09-24", "route_id": "…", "short_name": "T1", "headsign": "Central",
+  "start": { "stop_id": "…", "name": "Hornsby Station Platform 3", "scheduled": "2026-09-24T19:32:00+10:00" },
+  "end":   { "stop_id": "…", "name": "Central Station Platform 16", "scheduled": "2026-09-24T20:15:00+10:00" },
+  "stops": [
+    { "stop_id": "…", "name": "Hornsby Station Platform 3", "stop_sequence": 1, "scheduled": "2026-09-24T19:32:00+10:00",
+      "predicted": "2026-09-24T19:33:10+10:00", "delay_s": 70, "status": "on_time", "passed": true }
+  ],
+  "count": 1
+}
+```
+
+`status` is as for `/now`, plus `skipped` (the feed marked the stop `SKIPPED`) and `unknown` for a stop the feed never mentioned. `passed` is the predicted time, or the scheduled time without a delay, before now. `404 trip_not_found` if no loaded timetable has the trip; `400 invalid_parameter` without a valid `service_date`.
 
 #### `GET /v1/admin/stats`
 
@@ -1782,6 +1805,7 @@ Append-only. To reverse a decision, add a row that names the one it supersedes.
 | 2026-09-24 | Supersedes the previous row: `web/` is on **Cloudflare Pages** after all (project `transitlateagain`, root `web`, `npm run build`, output `out`, `NODE_VERSION=22`), and `web/wrangler.jsonc` is deleted. | The Workers Builds setup never produced a deployment; the Pages flow ("Looking to deploy Pages?" under Create application) built on its second attempt, after the build command was corrected from `npx run build`. Pages skipped the Workers config with a warning, so it was only confusion. | Keeping both configurations. |
 | 2026-09-24 | The schedule loader skips routes with no trips, so `/v1/lines` stops listing them and `/v1/lines/{id}/now` 404s for them. | Asked for by the user. 34 of 152 train routes in the live bundle have no trips (many are same-named duplicates such as `ESI_1b`), so they can never be matched or have data, and the site's picker offered them to see nothing. `/history` still reads `routes` directly and knows them. | Filtering in `lines` only, which needs a per-route trip index in `match.Schedule` for no gain; listing only routes with rollup rows, which hides a real route while its data is four hours behind or while its matching is broken — the case where seeing it empty matters. |
 | 2026-09-24 | The site picks a **line** (short name), then a **route** (long name), with a **Reverse** button, and replaces the on-time bar chart with a pie of on time / early / late / cancelled stop visits over the range. | Chosen by the user: one entry per `route_id` put up to 18 near-identical T2 rows in one menu. Routes with the same line and trimmed long name (`IWL_1a`/`IWL_1b`, 13 pairs) are one entry, fetched separately and summed in the browser — counts add exactly; median delay does not, so a merged `/now` has none. Reverse is the same line's route with the two ends swapped, matched on station names (TfNSW lists "Hornsby and Berowra" one way and "Berowra and Hornsby" the other); none is shown when TfNSW publishes none. Late includes very late, whose count the legend gives. | An API that accepts several route ids, a §7 change for what four summed integers already give; pairing directions by `_1x`/`_2x` id suffix, which is wrong for T1 (`WST_2c` reverses to `NSN_2k`); five slices, which no colour set separated under colour blindness in both themes. Units are stop visits, not trips: the rollups are per stop. |
+| 2026-09-24 | The site lists each running train as one collapsible row labelled by its scheduled start and end ("7:32 pm Hornsby → 8:15 pm Central", its delay and next stop); opened, it shows every stop with its delay. `/now` trips gain `start` and `end` from the timetable, and a new `GET /v1/trips/{trip_id}?service_date=` returns every stop with its last observation. | Asked for by the user: a table of trains that all said "To Central" with a different next stop read as one train's stops, and nothing told two services apart. The trip view has to include stops already served, which the cache drops (§9.1 case 18), so it reads `observations` by its primary key. | Keeping every call in the cache: memory on a 1 GB VM for a view opened rarely. Returning every stop in `/now`: tens of rows per trip on every 15 s refresh for rows that are mostly closed. Fetching `start`/`end` per row from the new endpoint: a request per train per refresh against a 10 req/s limit. |
 
 ---
 

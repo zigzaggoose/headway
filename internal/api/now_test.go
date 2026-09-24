@@ -33,7 +33,7 @@ func noSchedule() harness {
 
 func TestDataEndpoints_NoSchedule_AreNotReady(t *testing.T) {
 	h := noSchedule()
-	for _, path := range []string{"/v1/lines", "/v1/lines/R1/now", "/v1/stops/s1/now"} {
+	for _, path := range []string{"/v1/lines", "/v1/lines/R1/now", "/v1/stops/s1/now", "/v1/trips/trip-a?service_date=2026-09-23"} {
 		t.Run(path, func(t *testing.T) {
 			rec, body := h.get(t, path)
 			assertEnvelope(t, rec, body, 503, "not_ready")

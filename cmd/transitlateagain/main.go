@@ -177,6 +177,7 @@ func main() {
 		ReadyMaxFeedAge: cfg.HTTP.ReadyMaxFeedAge,
 		Schedules:       matcher.Schedules,
 		History:         db.History,
+		TripStops:       db.TripStops,
 		HistoryMaxDays:  cfg.HTTP.HistoryMaxDays,
 		RateLimit:       cfg.HTTP.RateLimit,
 		ClientIPHeader:  cfg.HTTP.ClientIPHeader,

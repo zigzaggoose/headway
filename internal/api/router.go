@@ -24,6 +24,7 @@ type Options struct {
 	ScheduleLoaded  func() bool // true once any feed's timetable is in the matcher
 	Schedules       func() []*match.Schedule
 	History         func(context.Context, store.HistoryQuery) (store.History, error)
+	TripStops       func(ctx context.Context, serviceDate time.Time, feedID, tripID string) (map[string]store.StopObservation, error)
 	HistoryMaxDays  int
 	RateLimit       float64 // HTTP_RATE_LIMIT_RPS per client IP; 0 disables it
 	ClientIPHeader  string  // HTTP_CLIENT_IP_HEADER; empty means the connection's address
@@ -58,6 +59,7 @@ func NewHandler(o Options) http.Handler {
 	mux.HandleFunc("GET /v1/stops/{stop_id}/now", s.stopNow)
 	mux.HandleFunc("GET /v1/lines/{route_id}/history", s.lineHistory)
 	mux.HandleFunc("GET /v1/stops/{stop_id}/history", s.stopHistory)
+	mux.HandleFunc("GET /v1/trips/{trip_id}", s.trip)
 	notFound(mux)
 	// The limit runs inside the middleware, so a 429 still gets a request id
 	// and an access log line.
