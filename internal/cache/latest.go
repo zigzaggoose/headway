@@ -46,6 +46,9 @@ type snapshot struct {
 	feedTS  time.Time
 	byRoute map[string][]Trip
 	byStop  map[string][]Call
+	// unchanged counts the polls in a row, before this one, whose header
+	// timestamp this one did not advance past (§9.5 staleness).
+	unchanged int
 }
 
 // Cache is safe for concurrent use: pollers update it, HTTP handlers read it.
@@ -128,8 +131,21 @@ func (c *Cache) Update(feedID string, feedTS time.Time, obs []ingest.Observation
 	}
 
 	c.mu.Lock()
+	if prev := c.feeds[feedID]; prev != nil && !feedTS.After(prev.feedTS) {
+		s.unchanged = prev.unchanged + 1
+	}
 	c.feeds[feedID] = s
 	c.mu.Unlock()
+}
+
+// Stale reports whether feedID's header timestamp has failed to advance for
+// polls successful polls in a row (FEED_STALE_POLLS). A producer that keeps
+// answering 200 with the same message is up, and serving nothing new.
+func (c *Cache) Stale(feedID string, polls int) bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	s := c.feeds[feedID]
+	return s != nil && s.unchanged >= polls
 }
 
 func served(o ingest.Observation, feedTS time.Time) bool {

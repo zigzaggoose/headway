@@ -4,6 +4,8 @@ import (
 	"sort"
 	"sync"
 	"time"
+
+	"github.com/zigzaggoose/transitlateagain/internal/metrics"
 )
 
 // Filter suppresses observations that say nothing new. It is the single
@@ -98,6 +100,7 @@ func (f *Filter) Admit(o Observation) bool {
 	prev, seen := f.entries[k]
 	if seen && !changed(prev, now, f.minDelta) {
 		f.suppressed++
+		metrics.Filtered.WithLabelValues(o.FeedID).Inc()
 		return false
 	}
 
@@ -108,6 +111,7 @@ func (f *Filter) Admit(o Observation) bool {
 	now.seq = f.seq
 	f.entries[k] = now
 	f.admitted++
+	metrics.Admitted.WithLabelValues(o.FeedID).Inc()
 	return true
 }
 

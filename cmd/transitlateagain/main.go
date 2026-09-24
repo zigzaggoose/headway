@@ -34,6 +34,7 @@ import (
 	"github.com/zigzaggoose/transitlateagain/internal/gtfsstatic"
 	"github.com/zigzaggoose/transitlateagain/internal/ingest"
 	"github.com/zigzaggoose/transitlateagain/internal/match"
+	"github.com/zigzaggoose/transitlateagain/internal/metrics"
 	"github.com/zigzaggoose/transitlateagain/internal/rollup"
 	"github.com/zigzaggoose/transitlateagain/internal/store"
 )
@@ -170,6 +171,22 @@ func main() {
 		Maintenance:     db.Maintenance,
 		Now:             time.Now,
 		Log:             log,
+	}
+	if cfg.Log.MetricsEnabled {
+		metrics.Watch(metrics.Sources{
+			FeedIDs:         feedIDs(cfg),
+			QueueLen:        func() int { return pipeline.Stats().QueueLen },
+			QueueDropped:    func() uint64 { return pipeline.Stats().Dropped },
+			RowsWritten:     func() uint64 { return pipeline.Stats().Written },
+			ScheduleVersion: matcher.Loaded,
+			Stale:           func(id string) bool { return latest.Stale(id, cfg.Poll.StalePolls) },
+			Maintenance: func(ctx context.Context) (metrics.Maintenance, error) {
+				m, err := db.Maintenance(ctx)
+				return metrics.Maintenance{Watermark: m.Watermark, Partitions: m.Partitions, DefaultRows: m.DefaultRows}, err
+			},
+			Now: time.Now,
+		})
+		apiOpts.Metrics = metrics.Handler()
 	}
 	srv := &http.Server{
 		Handler:           api.NewHandler(apiOpts),
@@ -346,6 +363,19 @@ func decodeAndIngest(log *slog.Logger, matcher *match.Matcher, pipeline *ingest.
 		}
 		obs, counts := matcher.Match(r.FeedID, decoded.Updates)
 		latest.Update(r.FeedID, decoded.HeaderTS, obs)
+		matchedBy, unmatchedBy, dropped := counts.Labels()
+		for reason, n := range decoded.Dropped {
+			dropped[string(reason)] += n
+		}
+		metrics.RecordPoll(r.FeedID, metrics.Poll{
+			HeaderTS:  decoded.HeaderTS,
+			FetchedAt: decoded.FetchedAt,
+			Decoded:   len(decoded.Updates),
+			Dropped:   dropped,
+			Matched:   matchedBy,
+			Unmatched: unmatchedBy,
+			MatchRate: counts.MatchRate(),
+		})
 		queued := 0
 		for _, o := range obs {
 			if pipeline.Submit(o) {

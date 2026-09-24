@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/zigzaggoose/transitlateagain/internal/config"
+	"github.com/zigzaggoose/transitlateagain/internal/metrics"
 )
 
 // Handler receives one fetched body. It is called on the poller's own
@@ -101,6 +102,7 @@ func (p *Poller) pollOnce(ctx context.Context) (wait time.Duration) {
 	defer func() {
 		// §10.1 allows recover in exactly three places and this is one of them.
 		if r := recover(); r != nil {
+			metrics.Panics.WithLabelValues("feed").Inc()
 			p.failures++
 			p.log.Error("poller panic recovered", "panic", fmt.Sprint(r), "stack", string(debug.Stack()))
 			wait = p.nextDelay()

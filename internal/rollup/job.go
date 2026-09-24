@@ -17,6 +17,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/zigzaggoose/transitlateagain/internal/config"
+	"github.com/zigzaggoose/transitlateagain/internal/metrics"
 	"github.com/zigzaggoose/transitlateagain/internal/servicetime"
 )
 
@@ -88,7 +89,10 @@ func (j *Job) Tick(ctx context.Context) error {
 	if _, err := j.EnsurePartitions(ctx, today.AddDate(0, 0, -1), today.AddDate(0, 0, j.opts.LookaheadDays)); err != nil {
 		errs = append(errs, err)
 	}
-	if _, err := j.Rollup(ctx); err != nil {
+	started := j.now()
+	_, err := j.Rollup(ctx)
+	metrics.RollupDuration.Observe(j.now().Sub(started).Seconds())
+	if err != nil {
 		errs = append(errs, err)
 	} else if _, err := j.DropPartitionsBefore(ctx, today.AddDate(0, 0, -j.opts.RetentionDays)); err != nil {
 		errs = append(errs, err)

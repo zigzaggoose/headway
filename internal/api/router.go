@@ -36,6 +36,10 @@ type Options struct {
 	MatchCounts   func() map[string]match.Counts
 	RequestsToday func() int
 	Maintenance   func(context.Context) (store.Maintenance, error)
+
+	// Metrics is the /metrics handler, served on the admin address only.
+	// Nil when METRICS_ENABLED is false.
+	Metrics http.Handler
 }
 
 type server struct{ Options }
@@ -64,6 +68,9 @@ func NewAdminHandler(o Options) http.Handler {
 	s := &server{o}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/admin/stats", s.adminStats)
+	if o.Metrics != nil {
+		mux.Handle("GET /metrics", o.Metrics)
+	}
 	notFound(mux)
 	return s.middleware(mux)
 }

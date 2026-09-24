@@ -35,13 +35,14 @@ about SQL, the API never writes.
 Go 1.27 · PostgreSQL 18 · `net/http.ServeMux` · `log/slog` · Docker · deployed to
 `linux/amd64`.
 
-Three direct dependencies, and §3.1 caps v1 at six:
+Four direct dependencies, and §3.1 caps v1 at six:
 
 | | |
 |---|---|
 | `github.com/jackc/pgx/v5` | driver + pool; `v5.9.2` is the minimum (SQL-injection fix) |
 | `github.com/MobilityData/gtfs-realtime-bindings/golang/gtfs` | generated protobuf structs |
 | `google.golang.org/protobuf` | `proto.Unmarshal` |
+| `github.com/prometheus/client_golang` | `/metrics` (§10.3), on the admin port only |
 
 **Adding a direct dependency requires asking first**, plus a Decision Log row saying
 what it replaced and why the standard library was not enough.
@@ -84,12 +85,13 @@ internal/config/       env → validated Config. Fails fast. Never read after st
 internal/feed/         HTTP client, token-bucket limiter, one poller per feed.
 internal/gtfsrt/       protobuf → RawUpdate. EVERY nil check in the codebase lives here.
 internal/ingest/       Observation, change filter, bounded channel, batch writer.
+internal/metrics/      every §10.3 metric. Imports nothing from this module.
 internal/store/        pool, migrations, hand-written SQL. No ORM.
 migrations/            NNNN_name.sql, applied in order, checksummed.
 testdata/              recorded .pb fixtures. Tests never call the live API.
 ```
 
-Not yet built: `internal/obs`, `web/`. §5 is the destination layout. Create a package
+Not yet built: `web/`. §5 is the destination layout. Create a package
 when its first real file is written — no placeholder files.
 
 ## Conventions

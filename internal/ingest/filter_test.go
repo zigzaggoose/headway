@@ -4,6 +4,10 @@ import (
 	"fmt"
 	"testing"
 	"time"
+
+	"github.com/prometheus/client_golang/prometheus/testutil"
+
+	"github.com/zigzaggoose/transitlateagain/internal/metrics"
 )
 
 func day(d int) time.Time { return time.Date(2026, 9, d, 0, 0, 0, 0, time.UTC) }
@@ -234,5 +238,20 @@ func TestFilter_BecomingMatched_IsAChange(t *testing.T) {
 	}
 	if f.Admit(o) {
 		t.Error("an unchanged matched observation was admitted twice")
+	}
+}
+
+func TestAdmit_CountsEachOutcomeUnderItsFeed(t *testing.T) {
+	f := NewFilter(0, 1000)
+	o := obs("t-metrics", "s1", i32(60))
+	o.FeedID = "filter-metrics-test"
+	admitted := metrics.Admitted.WithLabelValues(o.FeedID)
+	filtered := metrics.Filtered.WithLabelValues(o.FeedID)
+
+	f.Admit(o)
+	f.Admit(o)
+
+	if a, s := testutil.ToFloat64(admitted), testutil.ToFloat64(filtered); a != 1 || s != 1 {
+		t.Errorf("admitted %v, filtered %v; want 1 and 1", a, s)
 	}
 }

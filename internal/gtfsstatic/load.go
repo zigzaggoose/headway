@@ -19,6 +19,7 @@ import (
 
 	"github.com/zigzaggoose/transitlateagain/internal/config"
 	"github.com/zigzaggoose/transitlateagain/internal/feed"
+	"github.com/zigzaggoose/transitlateagain/internal/metrics"
 )
 
 // Loader downloads and loads schedule bundles. Load is not safe to call
@@ -114,6 +115,7 @@ func (l *Loader) Load(ctx context.Context, f config.Feed) (versionID int64, chan
 		// day is a disk cost, not a correctness one.
 		l.log.Warn("pruning old schedule versions failed", "feed_id", f.ID, "err", err.Error())
 	}
+	metrics.ScheduleLoadDuration.WithLabelValues(f.ID).Observe(l.now().Sub(start).Seconds())
 	l.log.Info("schedule version activated",
 		"feed_id", f.ID,
 		"version_id", versionID,

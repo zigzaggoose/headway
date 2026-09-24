@@ -3,11 +3,13 @@ package ingest
 import (
 	"context"
 	"log/slog"
+	"strconv"
 	"sync/atomic"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/zigzaggoose/transitlateagain/internal/metrics"
 	"github.com/zigzaggoose/transitlateagain/internal/store"
 )
 
@@ -169,7 +171,9 @@ func (w *Writer) writeBatch(ctx context.Context, batch []Observation, reason str
 		inserted = tag.RowsAffected()
 		return nil
 	})
+	metrics.WriteBatchDuration.Observe(time.Since(started).Seconds())
 	if err != nil {
+		metrics.WriteFailures.WithLabelValues(strconv.FormatBool(store.Retryable(err))).Inc()
 		w.failed.Add(uint64(len(batch)))
 		w.log.Error("batch write failed",
 			"rows", len(batch),
@@ -181,6 +185,12 @@ func (w *Writer) writeBatch(ctx context.Context, batch []Observation, reason str
 
 	w.batches.Add(1)
 	w.written.Add(uint64(inserted))
+	// Per row of the batch, conflicts included: the database does not say
+	// which rows it skipped, and a replayed row is as fresh as its feed_ts.
+	writtenAt := time.Now()
+	for _, o := range batch {
+		metrics.FreshnessLag.WithLabelValues(o.FeedID).Observe(writtenAt.Sub(o.FeedTS).Seconds())
+	}
 	// The difference is rows the natural key already held: a replay, or two
 	// pollers' worth of the same feed timestamp. Expected, and worth counting.
 	w.conflicts.Add(uint64(len(batch)) - uint64(inserted))

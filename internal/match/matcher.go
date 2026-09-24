@@ -19,6 +19,7 @@ type Counts struct {
 	Observations int // observations returned, including synthesised ones
 
 	FullMatch     int // orders 1 and 2: trip and stop found, scheduled time known
+	BySequence    int // part of FullMatch: order 1, the stop resolved by stop_sequence
 	TripOnly      int // order 3: trip found, stop not resolved
 	UnknownTrip   int // order 4: trip not in the schedule
 	Added         int // order 4 by definition; excluded from the match rate (§9.1 case 2)
@@ -42,6 +43,15 @@ func (c Counts) MatchRate() float64 {
 		return 0
 	}
 	return float64(c.FullMatch+c.TripOnly) / float64(denom)
+}
+
+// Labels splits the counts into the §10.3 metric labels: matched by
+// resolution order, unmatched and dropped by reason.
+func (c Counts) Labels() (matched, unmatched, dropped map[string]int) {
+	matched = map[string]int{"1": c.BySequence, "2": c.FullMatch - c.BySequence, "3": c.TripOnly}
+	unmatched = map[string]int{"unknown_trip": c.UnknownTrip, "added": c.Added, "no_schedule": c.NoSchedule}
+	dropped = map[string]int{"no_stop_id": c.NoStopID, "bad_start_date": c.BadStartDate, "trip_level_skipped": c.TripLevelSkipped}
+	return matched, unmatched, dropped
 }
 
 // Options are the §8 values the matcher uses.
@@ -209,6 +219,11 @@ func (m *Matcher) Match(feedID string, updates []gtfsrt.RawUpdate) ([]ingest.Obs
 		}
 
 		c.FullMatch++
+		// stop_sequence is unique within a trip, so a resolved stop carrying
+		// the update's sequence can only have come from order 1.
+		if u.StopSequence != nil && uint32(st.Seq) == *u.StopSequence {
+			c.BySequence++
+		}
 		scheduled := st.DepS
 		if scheduled == NoTime {
 			scheduled = st.ArrS

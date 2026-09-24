@@ -66,7 +66,7 @@ Versions are pinned. Where a version is stated below it was checked against the 
 | `net/http` `ServeMux` (stdlib) | — | HTTP routing | chi, gorilla/mux, echo, gin | Since Go 1.22 the standard `ServeMux` supports method-and-wildcard patterns such as `GET /v1/lines/{id}/now`, which is the entire routing requirement here. Zero dependencies to justify in an interview. |
 | `log/slog` (stdlib) | — | Structured logging | zerolog, zap | Standard library, JSON handler built in, good enough at this volume. |
 | `time/tzdata` (stdlib, blank import) | — | Embedding the IANA timezone database in the binary | Installing `tzdata` in the runtime image | The runtime image is distroless and has no timezone database. `import _ "time/tzdata"` makes `time.LoadLocation("Australia/Sydney")` work anyway. Without it, every DST calculation silently falls back to UTC. This is a real failure mode; see §9.2. |
-| prometheus/client_golang | latest v1 | `/metrics` (Stage 4) | Hand-written text exposition | Histograms with correct bucket accounting are tedious to hand-roll. Not a dependency until Stage 4. |
+| prometheus/client_golang | v1.24.1 | `/metrics` (Stage 4) | Hand-written text exposition | Histograms with correct bucket accounting are tedious to hand-roll. Not a dependency until Stage 4. |
 | Docker + Docker Compose | Compose v2 | Local dev and deployment | systemd unit + host Postgres | One `docker compose up` reproduces production on a laptop, and the learning goal includes Docker. |
 | Base image (build) | `golang:1.27-bookworm` | Compile stage | `golang:1.27-alpine` | CGO is off, so libc does not matter; bookworm avoids musl surprises if CGO is ever needed. |
 | Base image (runtime) | `gcr.io/distroless/static-debian12:nonroot` | Runtime stage | `alpine`, `scratch` | No shell, no package manager, runs as non-root, ~2 MB. Works with `CGO_ENABLED=0` static binaries on `linux/amd64`. |
@@ -334,9 +334,8 @@ transitlateagain/
 │   │   ├── render.go                 writeJSON, writeError. Single error envelope.
 │   │   ├── middleware.go             Request id, access log, panic recovery, timeout.
 │   │   └── api_test.go               httptest against a fake store.
-│   └── obs/
-│       ├── log.go                    slog setup, the standard field names.
-│       └── metrics.go                Prometheus collectors. Stage 4.
+│   └── metrics/
+│       └── metrics.go                Every §10.3 metric, on the default registry. Imports nothing from this module.
 │
 ├── migrations/
 │   ├── 0001_schedule.sql             schedule_versions and the static tables.
@@ -859,7 +858,7 @@ Readiness. `200` only if all of: a schedule version is active and loaded into th
 
 #### `GET /metrics`
 
-Prometheus text exposition. Stage 4.
+Prometheus text exposition, on `ADMIN_ADDR` only — the public address answers 404, like `/v1/admin/stats`. Off when `METRICS_ENABLED=false`. Carries the Go runtime and process collectors too (`process_start_time_seconds` is §1's uptime).
 
 ### 7.2 Error envelope
 
@@ -1253,7 +1252,7 @@ There is a second, related trap: the generated bindings in `github.com/MobilityD
 1. Filter map growth at end of service day — every trip id turns over daily. Evict entries whose `service_date` is more than one day old on every maintenance tick, and hard-cap at `FILTER_MAX_ENTRIES` with oldest-first eviction. Eviction causes redundant writes, never wrong data.
 2. Process restart clears the filter. The first poll after a restart therefore writes a full snapshot: a spike of tens of thousands of rows. This is correct and idempotent — the primary key absorbs any overlap — but the writer must be able to absorb the burst without dropping. Budget `INGEST_QUEUE_SIZE` for it.
 3. Retention must not run when the rollup is behind. Guard: `DropPartitionsBefore` reads `rollup_state.watermark` in the same transaction and returns an error rather than dropping.
-4. A partition that does not exist yet → writes fall into `observations_default`. This works but destroys the retention story, since a default partition cannot be dropped without losing everything in it. `EnsurePartitions` runs at startup and on every maintenance tick, and a non-empty `observations_default` is an alert. **Observed 2026-09-21:** with no maintenance job yet built, all 4,586 rows of a live run landed in the default partition, exactly as this case describes. It is the expected state until `internal/rollup` exists (Stage 3) and is the reason `Transit Late AgainDefaultPartitionUsed` is a paging alert.
+4. A partition that does not exist yet → writes fall into `observations_default`. This works but destroys the retention story, since a default partition cannot be dropped without losing everything in it. `EnsurePartitions` runs at startup and on every maintenance tick, and a non-empty `observations_default` is an alert. **Observed 2026-09-21:** with no maintenance job yet built, all 4,586 rows of a live run landed in the default partition, exactly as this case describes. It is the expected state until `internal/rollup` exists (Stage 3) and is the reason `TransitLateAgainDefaultPartitionUsed` is a paging alert.
 5. `DROP TABLE` on a partition blocks behind any open transaction reading the parent. Retention runs with `SET lock_timeout = '5s'` and retries on the next tick rather than queueing behind a long analytical query.
 6. Clock moving backwards (NTP step) making "today" earlier than the newest partition → `EnsurePartitions` is idempotent (`CREATE TABLE IF NOT EXISTS`) and retention uses `<`, so a backwards step delays a drop rather than causing one.
 7. The rollup recomputing a bucket that has already been dropped from raw → the `ON CONFLICT DO UPDATE` would overwrite a good row with zeros. Guard: the rollup only processes hours whose service date still has a raw partition; otherwise it skips and logs at WARN.
@@ -1399,7 +1398,7 @@ Prometheus, exposed on `/metrics`. Stage 4, but the names are fixed now so dashb
 | `transitlateagain_updates_dropped_total` | counter | `feed_id`, `reason` | Dropped in decode or match. |
 | `transitlateagain_matched_total` | counter | `feed_id`, `order` (`1`..`3`) | Matches by resolution order. |
 | `transitlateagain_unmatched_total` | counter | `feed_id`, `reason` | Order-4 outcomes. |
-| `transitlateagain_match_rate` | gauge | `feed_id` | 15-minute sliding ratio, excluding `reason="added"`. |
+| `transitlateagain_match_rate` | gauge | `feed_id` | The last poll's ratio, excluding `reason="added"`. A 15-minute window is `matched_total` over `matched_total + unmatched_total{reason!="added"}` in PromQL (§15). |
 | `transitlateagain_filtered_total` | counter | `feed_id` | Suppressed by the change filter. |
 | `transitlateagain_admitted_total` | counter | `feed_id` | Passed the change filter. |
 | `transitlateagain_queue_length` | gauge | — | Current channel occupancy. |
@@ -1424,13 +1423,13 @@ One alert is required by the Definition of Done; these are the candidates, in pr
 
 | Alert | Condition | Severity | First response |
 |---|---|---|---|
-| `Transit Late AgainIngestStopped` | `rate(transitlateagain_rows_written_total[10m]) == 0` for 15 m during service hours | page | Check `/v1/admin/stats`; check feed outcomes; check the disk. |
-| `Transit Late AgainFeedStale` | `transitlateagain_feed_stale == 1` for 10 m | warn | Usually upstream. Check the TfNSW API status page before touching anything. |
-| `Transit Late AgainQuotaExhausted` | `increase(transitlateagain_feed_requests_total{outcome="quota"}[1h]) > 0` | page | Reduce `FEED_POLL_INTERVAL` or disable a feed; the quota resets daily. |
-| `Transit Late AgainMatchRateLow` | `transitlateagain_match_rate < 0.8` for 30 m | warn | The schedule is probably stale or the bundle changed shape. Check `schedule_versions.loaded_at`. |
-| `Transit Late AgainFreshnessDegraded` | `histogram_quantile(0.95, transitlateagain_freshness_lag_seconds) > 60` for 15 m | warn | Writer is behind. Check `transitlateagain_queue_length` and disk IOPS. |
-| `Transit Late AgainDefaultPartitionUsed` | `transitlateagain_default_partition_rows > 0` | page | `EnsurePartitions` is not running. Fix before retention runs. |
-| `Transit Late AgainDiskLow` | node disk free < 15 % | page | Reduce `RETENTION_DAYS` and run `transitlateagain -maintain-once` (`make maintain`; on the VM `docker compose run --rm transitlateagain -maintain-once`). |
+| `TransitLateAgainIngestStopped` | `rate(transitlateagain_rows_written_total[10m]) == 0` for 15 m during service hours | page | Check `/v1/admin/stats`; check feed outcomes; check the disk. |
+| `TransitLateAgainFeedStale` | `transitlateagain_feed_stale == 1` for 10 m | warn | Usually upstream. Check the TfNSW API status page before touching anything. |
+| `TransitLateAgainQuotaExhausted` | `increase(transitlateagain_feed_requests_total{outcome="quota"}[1h]) > 0` | page | Reduce `FEED_POLL_INTERVAL` or disable a feed; the quota resets daily. |
+| `TransitLateAgainMatchRateLow` | `transitlateagain_match_rate < 0.8` for 30 m | warn | The schedule is probably stale or the bundle changed shape. Check `schedule_versions.loaded_at`. |
+| `TransitLateAgainFreshnessDegraded` | `histogram_quantile(0.95, transitlateagain_freshness_lag_seconds) > 60` for 15 m | warn | Writer is behind. Check `transitlateagain_queue_length` and disk IOPS. |
+| `TransitLateAgainDefaultPartitionUsed` | `transitlateagain_default_partition_rows > 0` | page | `EnsurePartitions` is not running. Fix before retention runs. |
+| `TransitLateAgainDiskLow` | node disk free < 15 % | page | Reduce `RETENTION_DAYS` and run `transitlateagain -maintain-once` (`make maintain`; on the VM `docker compose run --rm transitlateagain -maintain-once`). |
 
 ---
 
@@ -1532,10 +1531,10 @@ Each stage ends in something that runs and can be demonstrated. **Stage 2 is the
 
 ### Stage 4 — Observability and front end
 
-- [ ] `internal/obs/metrics.go` with every metric in §10.3.
+- [x] `internal/metrics/metrics.go` with every metric in §10.3. 2026-09-24; a test scrapes the registry for all 27 names. The package is `metrics`, not `obs`: `obs` is this codebase's name for a slice of observations (§15).
 - [ ] `/metrics` endpoint; Grafana Cloud free tier scraping it.
 - [ ] One dashboard: ingest rate, freshness p95, match rate, queue length, partition count, API p95.
-- [ ] One alert wired end to end — `Transit Late AgainIngestStopped` — with a `docs/runbook.md` entry.
+- [ ] One alert wired end to end — `TransitLateAgainIngestStopped` — with a `docs/runbook.md` entry.
 - [ ] `web/`: Next.js, one page, a line selector and a stop history chart hitting the live API.
 - [ ] Optional: custom domain and TLS via Caddy in Compose.
 - **Demo:** "here is the dashboard, and here is what happens when I stop the container."
@@ -1769,6 +1768,8 @@ Append-only. To reverse a decision, add a row that names the one it supersedes.
 | 2026-09-24 | The latest-state cache drops a stop once its scheduled time plus observed delay is more than 10 minutes behind the feed timestamp (§9.1 case 18), superseding the 2026-09-23 row's assumption that a trip's first reported stop is its next one. A constant, not configuration. | The producers keep finished trips and served stops; `/now` was reporting 21 % ghost trips, all "on time". Judging in the cache fixes `/v1/lines/{id}/now` and `/v1/stops/{id}/now` at once, and the feed timestamp keeps it replay-deterministic. Ten minutes sits above the dwell-and-lag cluster (0–5 min past: 27 trips) and far below the ghosts (hours). | Filtering in each handler (two copies of one rule); judging by our clock (not replayable); dropping served stops at ingest (the raw record should keep what the producer said). |
 | 2026-09-24 | Supersedes the previous row's 10 minutes: a stop is served 5 minutes after its predicted time. | Measured after deploying 10: nothing was left over 15 minutes past, but 58 of 643 trips showed as next a stop 5–10 minutes behind, the one they had just left, where before the change only 5 trips sat in that band and 27 within 0–5. | 10 minutes (shows the stop just left); 2 minutes (inside the lag of a 15 s poll plus a stale feed, so a train dwelling on time would jump a stop early). |
 | 2026-09-24 | The project is renamed from Headway to **Transit Late Again** (`transitlateagain`), with the domain `transitlateagain.dev`: module, command, image, Compose project, metric prefix, firewall unit and `/opt` path. Rows above this one keep the old name, because this log is append-only. `HEADWAY_FEEDS_FILE` and `HEADWAY_ENABLED_FEEDS` become `FEEDS_FILE` and `ENABLED_FEEDS`. The Postgres role and database stay `headway`, and the Compose volume is pinned to `headway_pgdata`. | The user found Headway vague and wanted a plain name for a showcase dashboard, not a product name; `.dev` says developer project, where `.au` says local service. Renaming before Stage 4 means the metric names are only ever published once. | whereismytrain (taken, and an existing app); howlate.au, ismytrainlate.au (offered, not chosen); renaming the Postgres role and database (downtime on the VM for a name nobody sees); letting the Compose volume follow the project name (the VM would start on an empty database). |
+| 2026-09-24 | `github.com/prometheus/client_golang` v1.24.1 is the fourth direct dependency, for `/metrics`. Asked and approved. | It replaces hand-written text exposition: six §10.3 metrics are histograms, whose cumulative buckets, `_sum` and `_count` must stay consistent under concurrent observation, and the process collector gives §1 its `process_start_time_seconds`. The standard library has neither. It brought `x/sync` and `x/text` up as indirect requirements. | Hand-written exposition (the histogram bookkeeping); OpenTelemetry (a larger dependency tree for one exporter). |
+| 2026-09-24 | Metrics are package variables in `internal/metrics` on the default registry. Components record events where they happen (fetch outcome in `feed.Client.Fetch`, so schedule downloads count too; filter outcomes in `Filter.Admit`; batch duration, failures and per-row freshness in the writer; load and rollup durations; HTTP by `Request.Pattern`, `unrouted` for a 429 the mux never saw; panics at the two recover sites that exist). Snapshots already kept elsewhere are read at scrape time. Deviations from §10.3 as first written: `match_rate` is the last poll, not a 15-minute window; order 1 is counted separately from order 2 (`Counts.BySequence`); `feed_stale` is new logic in the latest-state cache, which counts polls whose header timestamp did not advance. | One line at each call site; `metrics` imports nothing internal, so no cycle. A sliding window would need a new lock per feed for what PromQL computes from the counters. `FEED_STALE_POLLS` was validated but read by nothing. | Hooks injected into every component (a field and a wiring line each, for the same effect); a package named `obs` (collides with the observation slices named `obs` throughout); a per-feed ring buffer for `match_rate`. |
 
 ---
 

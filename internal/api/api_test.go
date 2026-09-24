@@ -12,10 +12,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus/testutil"
+
 	"github.com/zigzaggoose/transitlateagain/internal/cache"
 	"github.com/zigzaggoose/transitlateagain/internal/config"
 	"github.com/zigzaggoose/transitlateagain/internal/ingest"
 	"github.com/zigzaggoose/transitlateagain/internal/match"
+	"github.com/zigzaggoose/transitlateagain/internal/metrics"
 )
 
 // fixtureSchedule is feed "trains": routes R1 (T1) and R2 (T2), stops s1 to
@@ -366,5 +369,51 @@ func TestMiddleware_NotReady_IsNotAnErrorLine(t *testing.T) {
 	rec, _ := h.get(t, "/readyz")
 	if rec.Code != 503 || strings.Contains(buf.String(), `"level":"ERROR"`) {
 		t.Errorf("status %d, log:\n%s", rec.Code, buf.String())
+	}
+}
+
+func TestMiddleware_Metrics_LabelTheRouteByPatternNeverByPath(t *testing.T) {
+	counter := func(route, status string) float64 {
+		return testutil.ToFloat64(metrics.HTTPRequests.WithLabelValues(route, status))
+	}
+
+	t.Run("a path with an id is counted under its pattern", func(t *testing.T) {
+		before := counter("GET /v1/lines/{route_id}/now", "404")
+		newHarness(t, nil).get(t, "/v1/lines/NO-SUCH-ROUTE/now")
+		if got := counter("GET /v1/lines/{route_id}/now", "404") - before; got != 1 {
+			t.Errorf("pattern counter grew by %v, want 1", got)
+		}
+		if got := counter("/v1/lines/NO-SUCH-ROUTE/now", "404"); got != 0 {
+			t.Error("the raw path became a label value")
+		}
+	})
+	t.Run("a request the limiter refuses never reaches the mux", func(t *testing.T) {
+		h := NewHandler(Options{
+			Cache: cache.New(time.Hour, func() time.Time { return now }), RateLimit: 1,
+			Now: func() time.Time { return now }, Log: slog.New(slog.DiscardHandler),
+		})
+		before := counter("unrouted", "429")
+		for range 2 {
+			h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/v1/lines", nil))
+		}
+		if got := counter("unrouted", "429") - before; got != 1 {
+			t.Errorf("unrouted 429s grew by %v, want 1", got)
+		}
+	})
+}
+
+func TestMetricsEndpoint_OnlyOnTheAdminHandler(t *testing.T) {
+	o := Options{Now: func() time.Time { return now }, Log: slog.New(slog.DiscardHandler), Metrics: metrics.Handler()}
+	get := func(h http.Handler) *httptest.ResponseRecorder {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+		return rec
+	}
+
+	if rec := get(NewAdminHandler(o)); rec.Code != 200 || !strings.Contains(rec.Body.String(), "go_goroutines") {
+		t.Errorf("admin /metrics = %d", rec.Code)
+	}
+	if rec := get(NewHandler(o)); rec.Code != 404 {
+		t.Errorf("public /metrics = %d, want 404", rec.Code)
 	}
 }

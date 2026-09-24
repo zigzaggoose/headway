@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/zigzaggoose/transitlateagain/internal/config"
+	"github.com/zigzaggoose/transitlateagain/internal/metrics"
 )
 
 // Response is one fetched body. FetchedAt is our clock; the feed's own
@@ -100,7 +101,41 @@ type Conditional struct {
 
 // Fetch performs one GET. It returns a Response only for a 200 with a body;
 // every other outcome is an error the caller can match with errors.Is.
+//
+// Every upstream request, realtime or schedule, passes through here, so this
+// is where the request metrics are recorded.
 func (c *Client) Fetch(ctx context.Context, feedID, url string, cond Conditional) (Response, error) {
+	start := c.now()
+	resp, err := c.fetch(ctx, feedID, url, cond)
+	// A request our own shutdown cancelled says nothing about the upstream.
+	if ctx.Err() == nil {
+		metrics.FeedRequests.WithLabelValues(feedID, outcome(err)).Inc()
+		metrics.FeedRequestDuration.WithLabelValues(feedID).Observe(c.now().Sub(start).Seconds())
+	}
+	return resp, err
+}
+
+// outcome is the §10.3 label for a Fetch result.
+func outcome(err error) string {
+	switch {
+	case err == nil:
+		return "ok"
+	case errors.Is(err, ErrNotModified):
+		return "not_modified"
+	case errors.Is(err, ErrRateLimited):
+		return "rate_limited"
+	case errors.Is(err, ErrQuotaExhausted):
+		return "quota"
+	case errors.Is(err, ErrUnauthorized):
+		return "unauthorized"
+	case errors.Is(err, context.DeadlineExceeded):
+		return "timeout"
+	default:
+		return "error"
+	}
+}
+
+func (c *Client) fetch(ctx context.Context, feedID, url string, cond Conditional) (Response, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return Response{}, fmt.Errorf("build request (feed=%s): %w", feedID, err)

@@ -6,7 +6,10 @@ import (
 	"encoding/hex"
 	"net/http"
 	"runtime/debug"
+	"strconv"
 	"time"
+
+	"github.com/zigzaggoose/transitlateagain/internal/metrics"
 )
 
 type ctxKey struct{}
@@ -51,6 +54,7 @@ func (s *server) middleware(next http.Handler) http.Handler {
 
 		defer func() {
 			if p := recover(); p != nil {
+				metrics.Panics.WithLabelValues("api").Inc()
 				s.Log.Error("handler panicked", "component", "api", "request_id", id, "panic", p, "stack", string(debug.Stack()))
 				if rec.status == 0 {
 					writeError(rec, r, http.StatusInternalServerError, "internal", "internal error")
@@ -64,6 +68,18 @@ func (s *server) middleware(next http.Handler) http.Handler {
 				// real errors in a startup's worth of noise.
 				s.Log.Error("request failed", "component", "api", "request_id", id, "status", rec.status)
 			}
+			status := rec.status
+			if status == 0 {
+				status = http.StatusOK // the handler wrote nothing, so net/http sent 200
+			}
+			// ServeMux sets Pattern on this same request once it has routed
+			// it. Empty means it never got that far: a 429 from the limiter.
+			route := r.Pattern
+			if route == "" {
+				route = "unrouted"
+			}
+			metrics.HTTPRequests.WithLabelValues(route, strconv.Itoa(status)).Inc()
+			metrics.HTTPRequestDuration.WithLabelValues(route).Observe(s.Now().Sub(start).Seconds())
 			s.Log.Info("http request",
 				"component", "api",
 				"request_id", id,

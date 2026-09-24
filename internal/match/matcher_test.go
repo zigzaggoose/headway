@@ -145,6 +145,17 @@ func TestMatch_RawFields_PassThroughUnchanged(t *testing.T) {
 
 func TestMatch_ResolutionOrder_FirstHitWins(t *testing.T) {
 	m := matcher(true)
+	// The order label of transitlateagain_matched_total, which must name
+	// exactly one order per matched update.
+	order := func(n string) func(Counts) int {
+		return func(c Counts) int {
+			matched, _, _ := c.Labels()
+			if matched["1"]+matched["2"]+matched["3"] != 1 {
+				return -1
+			}
+			return matched[n]
+		}
+	}
 	cases := []struct {
 		name      string
 		u         func() gtfsrt.RawUpdate
@@ -157,18 +168,18 @@ func TestMatch_ResolutionOrder_FirstHitWins(t *testing.T) {
 			u := update("T-1", "", at(8, 5))
 			u.StopSequence = ptr(uint32(2))
 			return u
-		}, ptr(int32(2)), "B", true, func(c Counts) int { return c.FullMatch }},
+		}, ptr(int32(2)), "B", true, order("1")},
 		{"order 2: trip and a stop it visits once", func() gtfsrt.RawUpdate {
 			return update("T-1", "C", at(8, 15))
-		}, ptr(int32(3)), "C", true, func(c Counts) int { return c.FullMatch }},
+		}, ptr(int32(3)), "C", true, order("2")},
 		{"order 2 after order 1 misses: the feed is ahead of the bundle (§9.1 case 11)", func() gtfsrt.RawUpdate {
 			u := update("T-1", "B", at(8, 5))
 			u.StopSequence = ptr(uint32(99))
 			return u
-		}, ptr(int32(2)), "B", true, func(c Counts) int { return c.FullMatch }},
+		}, ptr(int32(2)), "B", true, order("2")},
 		{"order 3: trip known, stop not on it", func() gtfsrt.RawUpdate {
 			return update("T-1", "Z", at(8, 5))
-		}, nil, "Z", true, func(c Counts) int { return c.TripOnly }},
+		}, nil, "Z", true, order("3")},
 		{"order 3: a loop visiting the stop twice is ambiguous (§9.1 case 9)", func() gtfsrt.RawUpdate {
 			return update("LOOP", "A", at(9, 5))
 		}, nil, "A", true, func(c Counts) int { return c.AmbiguousStop }},

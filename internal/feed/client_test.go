@@ -9,7 +9,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus/testutil"
+
 	"github.com/zigzaggoose/transitlateagain/internal/config"
+	"github.com/zigzaggoose/transitlateagain/internal/metrics"
 )
 
 const testKey = "test-api-key"
@@ -209,4 +212,61 @@ func TestFetch_Errors_DoNotContainTheKey(t *testing.T) {
 	if strings.Contains(err.Error(), testKey) {
 		t.Errorf("error leaks the api key: %v", err)
 	}
+}
+
+func TestFetch_EveryOutcome_IsCountedUnderItsLabel(t *testing.T) {
+	cases := []struct {
+		name    string
+		handler http.HandlerFunc
+		want    string
+	}{
+		{"a 200 with a body is ok", func(w http.ResponseWriter, _ *http.Request) { w.Write([]byte{1}) }, "ok"},
+		{"a 304 is not_modified", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(304) }, "not_modified"},
+		{"a 401 is unauthorized", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(401) }, "unauthorized"},
+		{"the throttle 403 is rate_limited", func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("X-Error-Detail", "Account Over Rate Limit")
+			w.WriteHeader(403)
+		}, "rate_limited"},
+		{"the quota 403 is quota", func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("X-Error-Detail", "Account Over Quota Limit")
+			w.WriteHeader(403)
+		}, "quota"},
+		{"a hang past the timeout is timeout", func(w http.ResponseWriter, r *http.Request) {
+			select {
+			case <-r.Context().Done():
+			case <-time.After(time.Second):
+			}
+		}, "timeout"},
+		{"a 502 is error", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(502) }, "error"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c, srv := newTestClient(t, tc.handler, 50*time.Millisecond)
+			counter := metrics.FeedRequests.WithLabelValues("outcome-test", tc.want)
+			before := testutil.ToFloat64(counter)
+
+			_, _ = c.Fetch(context.Background(), "outcome-test", srv.URL, Conditional{}) // the error is what is being counted
+
+			if got := testutil.ToFloat64(counter) - before; got != 1 {
+				t.Errorf("%s grew by %v, want 1", tc.want, got)
+			}
+		})
+	}
+	t.Run("a request our own shutdown cancelled is not counted", func(t *testing.T) {
+		c, srv := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) { w.Write([]byte{1}) }, time.Second)
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		total := func() (n float64) {
+			for _, o := range []string{"ok", "not_modified", "rate_limited", "quota", "unauthorized", "timeout", "error"} {
+				n += testutil.ToFloat64(metrics.FeedRequests.WithLabelValues("cancel-test", o))
+			}
+			return n
+		}
+
+		_, _ = c.Fetch(ctx, "cancel-test", srv.URL, Conditional{}) // fails by design
+
+		if got := total(); got != 0 {
+			t.Errorf("counted %v requests, want 0", got)
+		}
+	})
 }

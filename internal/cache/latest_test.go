@@ -280,3 +280,33 @@ func TestFeeds_ReportsEachFeedsLatestTimestamp(t *testing.T) {
 		t.Errorf("feeds = %v", f)
 	}
 }
+
+func TestStale_HeaderTimestampNotAdvancing_CountsPolls(t *testing.T) {
+	c := New(45*time.Minute, fixedClock(t0))
+
+	t.Run("a feed never polled is not stale", func(t *testing.T) {
+		if c.Stale("trains", 1) {
+			t.Error("stale before any poll")
+		}
+	})
+	t.Run("stale once the timestamp has held for the given number of polls", func(t *testing.T) {
+		for i := range 3 {
+			c.Update("trains", t0, nil)
+			if got, want := c.Stale("trains", 2), i >= 2; got != want {
+				t.Errorf("after poll %d: stale = %v, want %v", i+1, got, want)
+			}
+		}
+	})
+	t.Run("an advancing timestamp resets it", func(t *testing.T) {
+		c.Update("trains", t0.Add(15*time.Second), nil)
+		if c.Stale("trains", 1) {
+			t.Error("still stale after the timestamp moved")
+		}
+	})
+	t.Run("a timestamp that goes backwards is not an advance", func(t *testing.T) {
+		c.Update("trains", t0, nil)
+		if !c.Stale("trains", 1) {
+			t.Error("a step back counted as fresh data")
+		}
+	})
+}
