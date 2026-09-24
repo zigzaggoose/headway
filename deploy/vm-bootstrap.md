@@ -85,11 +85,15 @@ cat >> /opt/headway/.env <<EOF
 POSTGRES_PASSWORD=$(openssl rand -hex 24)
 RETENTION_DAYS=7
 DB_MAX_CONNS=5
+HTTP_RATE_LIMIT_RPS=10
 EOF
 ```
 
 `DATABASE_URL` is deliberately absent: Compose builds it from
 `POSTGRES_PASSWORD`. Everything else takes the §8 defaults.
+`HTTP_RATE_LIMIT_RPS=10` was added after the first deploy: a history query
+costs ~20 ms of the one vCPU, so the default of 50 per IP let one client
+saturate it, and a person needs one or two a second.
 
 ## 5. Start
 
@@ -97,6 +101,36 @@ EOF
 cd /opt/headway
 docker compose --env-file .env -f deploy/docker-compose.yml up -d --build
 ```
+
+## 6. Per-IP connection limits
+
+`deploy/firewall.sh` puts a connection cap and a new-connection rate on port
+8080 in Docker's `DOCKER-USER` chain (the script says why ufw cannot), run at
+every boot after Docker:
+
+```sh
+cat > /etc/systemd/system/headway-firewall.service <<'UNIT'
+[Unit]
+Description=Headway per-IP limits on the API port
+Requires=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/sh /opt/headway/deploy/firewall.sh
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+systemctl daemon-reload && systemctl enable --now headway-firewall
+iptables -L HEADWAY-LIMIT -v -n
+```
+
+Measured from a laptop on 2026-09-24: of 120 new connections opened 60 at a
+time, the `DROP` rule took 33, and the next request went straight through. 25
+concurrent `/v1/lines` requests gave 10 × 200, 10 × 429 from the application
+limit and 5 dropped.
 
 ## Updating
 
