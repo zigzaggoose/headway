@@ -1,22 +1,5 @@
 {
-  "__inputs": [
-    {
-      "name": "DS_PROM",
-      "label": "Prometheus",
-      "description": "The Grafana Cloud Prometheus data source",
-      "type": "datasource",
-      "pluginId": "prometheus",
-      "pluginName": "Prometheus"
-    }
-  ],
-  "__requires": [
-    {
-      "type": "datasource",
-      "id": "prometheus",
-      "name": "Prometheus",
-      "version": "1.0.0"
-    }
-  ],
+  "id": null,
   "title": "Transit Late Again",
   "uid": "transitlateagain",
   "tags": [
@@ -39,7 +22,7 @@
       "description": "Rows actually inserted. Zero for 15 minutes fires TransitLateAgainIngestStopped.",
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROM}"
+        "uid": "${datasource}"
       },
       "gridPos": {
         "x": 0,
@@ -51,7 +34,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROM}"
+            "uid": "${datasource}"
           },
           "expr": "sum(rate(transitlateagain_rows_written_total[5m])) * 60",
           "legendFormat": "",
@@ -97,7 +80,7 @@
       "description": "Write time minus feed_ts. The headline number (\u00a713).",
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROM}"
+        "uid": "${datasource}"
       },
       "gridPos": {
         "x": 4,
@@ -109,7 +92,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROM}"
+            "uid": "${datasource}"
           },
           "expr": "histogram_quantile(0.95, sum by (le) (rate(transitlateagain_freshness_lag_seconds_bucket[5m])))",
           "legendFormat": "",
@@ -155,7 +138,7 @@
       "description": "Ingest channel occupancy; the capacity is 8192.",
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROM}"
+        "uid": "${datasource}"
       },
       "gridPos": {
         "x": 8,
@@ -167,7 +150,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROM}"
+            "uid": "${datasource}"
           },
           "expr": "transitlateagain_queue_length",
           "legendFormat": "",
@@ -217,7 +200,7 @@
       "description": "Daily observation partitions: RETENTION_DAYS back plus the lookahead.",
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROM}"
+        "uid": "${datasource}"
       },
       "gridPos": {
         "x": 12,
@@ -229,7 +212,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROM}"
+            "uid": "${datasource}"
           },
           "expr": "transitlateagain_partitions",
           "legendFormat": "",
@@ -262,7 +245,7 @@
       "description": "Should always be 0: rows here escape retention.",
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROM}"
+        "uid": "${datasource}"
       },
       "gridPos": {
         "x": 16,
@@ -274,7 +257,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROM}"
+            "uid": "${datasource}"
           },
           "expr": "transitlateagain_default_partition_rows",
           "legendFormat": "",
@@ -320,7 +303,7 @@
       "description": "Public routes only.",
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROM}"
+        "uid": "${datasource}"
       },
       "gridPos": {
         "x": 20,
@@ -332,7 +315,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROM}"
+            "uid": "${datasource}"
           },
           "expr": "histogram_quantile(0.95, sum by (le) (rate(transitlateagain_http_request_duration_seconds_bucket{route!~\"GET /metrics|GET /v1/admin/stats|unrouted\"}[5m])))",
           "legendFormat": "",
@@ -378,7 +361,7 @@
       "description": "Rows written after the change filter, and updates decoded per feed before it.",
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROM}"
+        "uid": "${datasource}"
       },
       "gridPos": {
         "x": 0,
@@ -390,7 +373,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROM}"
+            "uid": "${datasource}"
           },
           "expr": "sum(rate(transitlateagain_rows_written_total[5m])) * 60",
           "legendFormat": "rows written / min",
@@ -399,7 +382,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROM}"
+            "uid": "${datasource}"
           },
           "expr": "sum by (feed_id) (rate(transitlateagain_updates_decoded_total[5m])) * 60",
           "legendFormat": "{{feed_id}} decoded / min",
@@ -421,7 +404,7 @@
       "description": "",
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROM}"
+        "uid": "${datasource}"
       },
       "gridPos": {
         "x": 12,
@@ -433,7 +416,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROM}"
+            "uid": "${datasource}"
           },
           "expr": "histogram_quantile(0.95, sum by (le, feed_id) (rate(transitlateagain_freshness_lag_seconds_bucket[5m])))",
           "legendFormat": "{{feed_id}}",
@@ -455,7 +438,7 @@
       "description": "Matched over matched plus unmatched, ADDED trips excluded (\u00a79.1 case 2). A feed publishing nothing shows no line.",
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROM}"
+        "uid": "${datasource}"
       },
       "gridPos": {
         "x": 0,
@@ -467,7 +450,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROM}"
+            "uid": "${datasource}"
           },
           "expr": "sum by (feed_id) (increase(transitlateagain_matched_total[15m])) / (sum by (feed_id) (increase(transitlateagain_matched_total[15m])) + sum by (feed_id) (increase(transitlateagain_unmatched_total{reason!=\"added\"}[15m])))",
           "legendFormat": "{{feed_id}}",
@@ -491,7 +474,7 @@
       "description": "",
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROM}"
+        "uid": "${datasource}"
       },
       "gridPos": {
         "x": 12,
@@ -503,7 +486,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROM}"
+            "uid": "${datasource}"
           },
           "expr": "transitlateagain_queue_length",
           "legendFormat": "queue length",
@@ -512,7 +495,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROM}"
+            "uid": "${datasource}"
           },
           "expr": "sum(increase(transitlateagain_dropped_total[5m]))",
           "legendFormat": "dropped, 5 min",
@@ -534,7 +517,7 @@
       "description": "",
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROM}"
+        "uid": "${datasource}"
       },
       "gridPos": {
         "x": 0,
@@ -546,7 +529,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROM}"
+            "uid": "${datasource}"
           },
           "expr": "histogram_quantile(0.95, sum by (le, route) (rate(transitlateagain_http_request_duration_seconds_bucket{route!~\"GET /metrics|GET /v1/admin/stats|unrouted\"}[5m])))",
           "legendFormat": "{{route}}",
@@ -568,7 +551,7 @@
       "description": "",
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROM}"
+        "uid": "${datasource}"
       },
       "gridPos": {
         "x": 12,
@@ -580,7 +563,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROM}"
+            "uid": "${datasource}"
           },
           "expr": "sum by (status) (rate(transitlateagain_http_requests_total{route!~\"GET /metrics|GET /v1/admin/stats|unrouted\"}[5m])) * 60",
           "legendFormat": "{{status}}",
@@ -602,7 +585,7 @@
       "description": "Every TfNSW request, realtime and schedule. quota or unauthorized means act now.",
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROM}"
+        "uid": "${datasource}"
       },
       "gridPos": {
         "x": 0,
@@ -614,7 +597,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROM}"
+            "uid": "${datasource}"
           },
           "expr": "sum by (outcome) (increase(transitlateagain_feed_requests_total[15m]))",
           "legendFormat": "{{outcome}}",
@@ -636,7 +619,7 @@
       "description": "Fetch time minus the feed's own header timestamp at the last successful poll.",
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROM}"
+        "uid": "${datasource}"
       },
       "gridPos": {
         "x": 12,
@@ -648,7 +631,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROM}"
+            "uid": "${datasource}"
           },
           "expr": "transitlateagain_feed_age_seconds",
           "legendFormat": "{{feed_id}}",
@@ -670,7 +653,7 @@
       "description": "Now minus the rollup watermark. Hours roll up 3 h after they end, so 3\u20134 h is normal.",
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROM}"
+        "uid": "${datasource}"
       },
       "gridPos": {
         "x": 0,
@@ -682,7 +665,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROM}"
+            "uid": "${datasource}"
           },
           "expr": "transitlateagain_rollup_lag_seconds",
           "legendFormat": "",
@@ -704,7 +687,7 @@
       "description": "1 when a feed's header timestamp has not advanced for FEED_STALE_POLLS polls.",
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROM}"
+        "uid": "${datasource}"
       },
       "gridPos": {
         "x": 12,
@@ -716,7 +699,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROM}"
+            "uid": "${datasource}"
           },
           "expr": "max(transitlateagain_feed_stale)",
           "legendFormat": "",
@@ -757,7 +740,18 @@
     }
   ],
   "templating": {
-    "list": []
+    "list": [
+      {
+        "name": "datasource",
+        "label": "Data source",
+        "type": "datasource",
+        "query": "prometheus",
+        "current": {},
+        "hide": 0,
+        "refresh": 1,
+        "options": []
+      }
+    ]
   },
   "annotations": {
     "list": []
