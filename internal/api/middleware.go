@@ -89,6 +89,7 @@ func (s *server) middleware(next http.Handler) http.Handler {
 				"duration_ms", s.Now().Sub(start).Milliseconds(),
 				"bytes", rec.bytes,
 				"remote", r.RemoteAddr,
+				"client_ip", s.clientIP(r),
 			)
 		}()
 		next.ServeHTTP(rec, r)

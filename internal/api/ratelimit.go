@@ -13,10 +13,10 @@ import (
 // Each bucket holds one second of requests, so a client may burst to the
 // rate and sustain it, and no more.
 //
-// It is keyed on the connection's address, not X-Forwarded-For: nothing sits
-// in front of the service, so that header is whatever the client chose to
-// send. Behind a proxy this would limit the proxy, and the key would need to
-// change.
+// It is keyed on the connection's address unless ClientIPHeader names a header
+// set by the one proxy that can reach the service (on the VM, Cloudflare's
+// CF-Connecting-IP through the tunnel). Never X-Forwarded-For by default: on
+// a port anyone can reach, a header is whatever the client chose to send.
 type ipLimiter struct {
 	rate float64 // tokens per second, and the bucket size
 	now  func() time.Time
@@ -77,6 +77,21 @@ func (l *ipLimiter) size() int {
 	return len(l.buckets)
 }
 
+// clientIP is the address a request is limited and logged under: the trusted
+// proxy header when one is configured and present, else the connection's.
+func (s *server) clientIP(r *http.Request) string {
+	if s.ClientIPHeader != "" {
+		if ip := r.Header.Get(s.ClientIPHeader); ip != "" {
+			return ip
+		}
+	}
+	ip, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr // not host:port, as in some tests; still a stable key
+	}
+	return ip
+}
+
 // limit wraps next with the per-IP limit. Health probes are exempt: an
 // orchestrator polling /readyz must never be told to back off.
 func (s *server) limit(next http.Handler) http.Handler {
@@ -89,11 +104,7 @@ func (s *server) limit(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		ip, _, err := net.SplitHostPort(r.RemoteAddr)
-		if err != nil {
-			ip = r.RemoteAddr // not host:port, as in some tests; still a stable key
-		}
-		ok, wait := l.allow(ip)
+		ok, wait := l.allow(s.clientIP(r))
 		if !ok {
 			secs := int(math.Ceil(wait.Seconds()))
 			w.Header().Set("Retry-After", strconv.Itoa(max(1, secs)))

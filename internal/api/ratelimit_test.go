@@ -99,3 +99,47 @@ func TestLimit_OverTheRate_Is429WithRetryAfter(t *testing.T) {
 		t.Errorf("a health probe was limited: %d", rec.Code)
 	}
 }
+
+func TestLimit_ClientIPHeader_KeysOnTheProxysHeaderOnlyWhenConfigured(t *testing.T) {
+	handler := func(header string) http.Handler {
+		c := &clock{t: now}
+		return NewHandler(Options{
+			Cache:          cache.New(time.Hour, c.now),
+			Schedules:      func() []*match.Schedule { return []*match.Schedule{fixtureSchedule()} },
+			ScheduleLoaded: func() bool { return true },
+			RateLimit:      1,
+			ClientIPHeader: header,
+			OnTime:         thresholds,
+			Now:            c.now,
+			Log:            slog.New(slog.DiscardHandler),
+		})
+	}
+	// Every request arrives from the tunnel's container, as on the VM.
+	get := func(h http.Handler, client string) int {
+		r := httptest.NewRequest(http.MethodGet, "/v1/lines", nil)
+		r.RemoteAddr = "172.18.0.3:40000"
+		if client != "" {
+			r.Header.Set("CF-Connecting-IP", client)
+		}
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, r)
+		return rec.Code
+	}
+
+	t.Run("configured, two visitors behind one proxy have a bucket each", func(t *testing.T) {
+		h := handler("CF-Connecting-IP")
+		if a, b := get(h, "203.0.113.9"), get(h, "198.51.100.7"); a != 200 || b != 200 {
+			t.Errorf("first requests: %d and %d, want 200 and 200", a, b)
+		}
+		if code := get(h, "203.0.113.9"); code != 429 {
+			t.Errorf("second request from one visitor = %d, want 429", code)
+		}
+	})
+	t.Run("not configured, a client cannot pick its bucket by sending the header", func(t *testing.T) {
+		h := handler("")
+		get(h, "203.0.113.9")
+		if code := get(h, "198.51.100.7"); code != 429 {
+			t.Errorf("a spoofed header bought a fresh bucket: %d", code)
+		}
+	})
+}

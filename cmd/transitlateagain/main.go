@@ -165,6 +165,7 @@ func main() {
 		History:         db.History,
 		HistoryMaxDays:  cfg.HTTP.HistoryMaxDays,
 		RateLimit:       cfg.HTTP.RateLimit,
+		ClientIPHeader:  cfg.HTTP.ClientIPHeader,
 		PipelineStats:   pipeline.Stats,
 		MatchCounts:     matcher.LastCounts,
 		RequestsToday:   limiter.Used,

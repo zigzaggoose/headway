@@ -5,5 +5,9 @@ services:
     ports:
       - "5433:5432"
   transitlateagain:
+    # The VM has no public port (it is reached through the tunnel); locally the
+    # API is on 8080 as usual. Compose appends this to the base file's ports.
+    ports:
+      - "8080:8080"
     environment:
       LOG_FORMAT: text

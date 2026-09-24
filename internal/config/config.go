@@ -116,6 +116,7 @@ type HTTPConfig struct {
 	WriteTimeout    time.Duration // HTTP_WRITE_TIMEOUT
 	ShutdownGrace   time.Duration // HTTP_SHUTDOWN_GRACE
 	RateLimit       float64       // HTTP_RATE_LIMIT_RPS, per IP
+	ClientIPHeader  string        // HTTP_CLIENT_IP_HEADER; empty means the connection's address
 	HistoryMaxDays  int           // HISTORY_MAX_DAYS
 	CacheTTL        time.Duration // CACHE_TTL
 	ReadyMaxFeedAge time.Duration // READY_MAX_FEED_AGE
@@ -191,6 +192,7 @@ func load(lookup func(string) (string, bool)) (*Config, error) {
 			WriteTimeout:    l.dur("HTTP_WRITE_TIMEOUT", 30*time.Second),
 			ShutdownGrace:   l.dur("HTTP_SHUTDOWN_GRACE", 20*time.Second),
 			RateLimit:       l.float("HTTP_RATE_LIMIT_RPS", 50),
+			ClientIPHeader:  l.str("HTTP_CLIENT_IP_HEADER", ""),
 			HistoryMaxDays:  l.int("HISTORY_MAX_DAYS", 90),
 			CacheTTL:        l.dur("CACHE_TTL", 45*time.Minute),
 			ReadyMaxFeedAge: l.dur("READY_MAX_FEED_AGE", 120*time.Second),

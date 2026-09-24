@@ -26,6 +26,7 @@ type Options struct {
 	History         func(context.Context, store.HistoryQuery) (store.History, error)
 	HistoryMaxDays  int
 	RateLimit       float64 // HTTP_RATE_LIMIT_RPS per client IP; 0 disables it
+	ClientIPHeader  string  // HTTP_CLIENT_IP_HEADER; empty means the connection's address
 	OnTime          config.Thresholds
 	ReadyMaxFeedAge time.Duration
 	Now             func() time.Time
