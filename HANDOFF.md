@@ -85,8 +85,9 @@ run is in `deploy/vm-bootstrap.md`; update with `git pull` and `docker compose
 
 ## Things that are true and easy to forget
 
-- **TfNSW's trains schedule endpoint returns 502 often.** The loader retries
-  every 15 minutes and keeps the stored version.
+- **TfNSW answers an unchanged `If-Modified-Since` with 502, not 304.** That was
+  the "trains schedule endpoint returns 502 often" of 2026-09-23; schedule
+  downloads have been unconditional since 2026-09-24 (§15).
 - **Trains never sends `stop_sequence`, `start_date`, `direction_id` or a vehicle
   id.** 275 of 354 train trip updates carry delays only, no absolute times.
 - **Schedule relationships stay raw integers.** `REPLACEMENT` (5) is ~15–18 % of

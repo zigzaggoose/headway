@@ -67,17 +67,17 @@ func testPool(t *testing.T) *pgxpool.Pool {
 	return s.Pool()
 }
 
-// upstream stands in for the TfNSW schedule endpoint. It honours
-// If-Modified-Since only when honour304 is set, because the real one
-// republishes identical content under a new Last-Modified.
+// upstream stands in for the TfNSW schedule endpoint. With badGateway304 it
+// does what the real one does with an If-Modified-Since the bundle has not
+// moved past: answer 502, not 304 (measured 2026-09-24).
 type upstream struct {
-	mu           sync.Mutex
-	body         []byte
-	lastModified time.Time
-	honour304    bool
-	requests     int
-	gotIMS       string
-	fail         bool // answer 502, as the real endpoint did on 2026-09-23
+	mu            sync.Mutex
+	body          []byte
+	lastModified  time.Time
+	badGateway304 bool
+	requests      int
+	gotIMS        string
+	fail          bool // answer 502, as the real endpoint did on 2026-09-23
 }
 
 func (u *upstream) set(body []byte, lm time.Time) {
@@ -95,8 +95,8 @@ func (u *upstream) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadGateway)
 		return
 	}
-	if u.honour304 && u.gotIMS == u.lastModified.Format(http.TimeFormat) {
-		w.WriteHeader(http.StatusNotModified)
+	if u.badGateway304 && u.gotIMS == u.lastModified.Format(http.TimeFormat) {
+		w.WriteHeader(http.StatusBadGateway)
 		return
 	}
 	w.Header().Set("Last-Modified", u.lastModified.Format(http.TimeFormat))
@@ -215,9 +215,9 @@ func TestLoad_FirstBundle_LoadsEveryTableAndActivates(t *testing.T) {
 }
 
 func TestLoad_Unchanged_IsANoOp(t *testing.T) {
-	t.Run("a 304 is unchanged and sends the stored Last-Modified", func(t *testing.T) {
+	t.Run("an upstream that answers an unchanged If-Modified-Since with 502 is never sent one", func(t *testing.T) {
 		h := newHarness(t, 3)
-		h.up.honour304 = true
+		h.up.badGateway304 = true
 		h.up.set(gtfs(t, "a"), lm1)
 		first, _ := h.load(t)
 
@@ -226,8 +226,8 @@ func TestLoad_Unchanged_IsANoOp(t *testing.T) {
 		if changed || second != first {
 			t.Errorf("second load = %d changed %v, want %d unchanged", second, changed, first)
 		}
-		if h.up.gotIMS != lm1.Format(http.TimeFormat) {
-			t.Errorf("If-Modified-Since = %q, want %q", h.up.gotIMS, lm1.Format(http.TimeFormat))
+		if h.up.gotIMS != "" {
+			t.Errorf("If-Modified-Since = %q, want none", h.up.gotIMS)
 		}
 	})
 	t.Run("identical content under a new Last-Modified adds no version", func(t *testing.T) {

@@ -45,33 +45,20 @@ func NewLoader(pool *pgxpool.Pool, client *feed.Client, limiter *feed.Limiter, m
 }
 
 // Load makes the feed's current bundle the active schedule version. changed
-// is false when the upstream bundle is the one already active: a 304, or a
-// download whose content hash matches.
+// is false when the downloaded bundle's content hash is the active one's.
+//
+// The download is unconditional. TfNSW answers an If-Modified-Since the
+// bundle has not moved past with 502, not 304 (measured 2026-09-24), so a
+// conditional request can never skip a download: after a 502 the bundle has
+// to be fetched anyway to tell "unchanged" from a real outage (§15).
 func (l *Loader) Load(ctx context.Context, f config.Feed) (versionID int64, changed bool, err error) {
 	start := l.now()
-
-	var cond feed.Conditional
-	var activeID int64
-	var lastModified *time.Time
-	err = l.pool.QueryRow(ctx,
-		`SELECT id, last_modified FROM schedule_versions WHERE feed_id = $1 AND active`, f.ID,
-	).Scan(&activeID, &lastModified)
-	switch {
-	case errors.Is(err, pgx.ErrNoRows):
-	case err != nil:
-		return 0, false, fmt.Errorf("read active schedule (feed=%s): %w", f.ID, err)
-	case lastModified != nil:
-		cond.LastModified = lastModified.UTC().Format(http.TimeFormat)
-	}
 
 	// The schedule download spends the same account quota as the pollers.
 	if err := l.limiter.Wait(ctx); err != nil {
 		return 0, false, fmt.Errorf("schedule download (feed=%s): %w", f.ID, err)
 	}
-	resp, err := l.client.Fetch(ctx, f.ID, f.ScheduleURL, cond)
-	if errors.Is(err, feed.ErrNotModified) {
-		return activeID, false, nil
-	}
+	resp, err := l.client.Fetch(ctx, f.ID, f.ScheduleURL, feed.Conditional{})
 	if err != nil {
 		return 0, false, fmt.Errorf("schedule download (feed=%s): %w", f.ID, err)
 	}

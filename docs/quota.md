@@ -23,8 +23,11 @@ while the download fails.
 `FEED_DAILY_BUDGET`. Measured: 45 requests in a two-minute run with all five
 feeds and their first schedule downloads (2026-09-23), which is the rate above.
 
-The worst case is not hypothetical: the Sydney Trains schedule endpoint answered
-502 for most of the evening of 2026-09-23.
+The 502s from the Sydney Trains schedule endpoint on the evening of 2026-09-23
+were our own doing: TfNSW answers an `If-Modified-Since` the bundle has not
+moved past with 502 rather than 304, so every refresh after the first failed
+and retried all five feeds every 15 minutes. Downloads are unconditional since
+2026-09-24 (`PROJECT.md` §15). The worst case now needs a real outage.
 
 ## Not enabled: buses
 
