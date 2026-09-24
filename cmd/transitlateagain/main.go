@@ -5,6 +5,7 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"flag"
 	"fmt"
@@ -120,6 +121,19 @@ func main() {
 		log.Error("cannot start", "component", "main", "err", err.Error())
 		db.Close()
 		os.Exit(2)
+	}
+	// On the VM the API serves Cloudflare's origin certificate, so the hop
+	// from Cloudflare is encrypted too (Full (strict), §15). Loaded here so a
+	// missing or mismatched file refuses to start instead of failing the
+	// first handshake.
+	if cfg.HTTP.TLSCertFile != "" {
+		cert, err := tls.LoadX509KeyPair(cfg.HTTP.TLSCertFile, cfg.HTTP.TLSKeyFile)
+		if err != nil {
+			log.Error("cannot start", "component", "main", "err", err.Error())
+			db.Close()
+			os.Exit(2)
+		}
+		ln = tls.NewListener(ln, &tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS12})
 	}
 
 	pipeline := ingest.NewPipeline(db.Pool(), ingest.PipelineConfig{

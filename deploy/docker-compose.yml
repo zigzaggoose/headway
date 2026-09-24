@@ -1,7 +1,8 @@
-# Production and local: postgres + transitlateagain. Run from the repository root with
-#   docker compose --env-file .env -f deploy/docker-compose.yml up -d
-# (make up adds the local override). On the VM the repository is cloned to
-# /opt/transitlateagain, so ../.env below is /opt/transitlateagain/.env (§8.2).
+# Production and local: postgres + transitlateagain. Run from the repository root.
+# make up adds the local override; the VM adds docker-compose.vm.yml:
+#   docker compose --env-file .env -f deploy/docker-compose.yml -f deploy/docker-compose.vm.yml up -d
+# On the VM the repository is cloned to /opt/transitlateagain, so ../.env below
+# is /opt/transitlateagain/.env (§8.2).
 
 name: transitlateagain
 
@@ -51,8 +52,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-    # No public port: on the VM the only way in is the Cloudflare Tunnel below,
-    # over the Compose network. The local override publishes 8080 for make up.
+    # No public port here: the VM adds 443 for Cloudflare
+    # (docker-compose.vm.yml), and the local override adds 8080 for make up.
     ports:
       # Host loopback only: reach it with ssh, never from outside (§7).
       - "127.0.0.1:8081:8081"
@@ -65,41 +66,6 @@ services:
     # No healthcheck: the image has no shell or HTTP client to run one, and
     # Compose does not restart an unhealthy container anyway. /healthz is for
     # whatever watches from outside.
-
-  # The two below run only where COMPOSE_PROFILES=vm, which the VM's .env sets.
-
-  cloudflared:
-    # Cloudflare Tunnel: an outbound connection that carries transitlateagain.dev
-    # to transitlateagain:8080, so the VM publishes no public port (§15). The
-    # hostname-to-service mapping lives in the Cloudflare dashboard.
-    image: cloudflare/cloudflared:2026.9.1@sha256:b269e8abd07a5bf6f3f4be65d5050b2174eca89c56a0241a8ff32a16aec454e4
-    command: ["tunnel", "--no-autoupdate", "run"]
-    environment:
-      TUNNEL_TOKEN: ${TUNNEL_TOKEN:-}
-    depends_on:
-      - transitlateagain
-    profiles: ["vm"]
-    restart: unless-stopped
-    logging: *logging
-
-  alloy:
-    # Pushes /metrics to Grafana Cloud (deploy/alloy.config).
-    image: grafana/alloy:v1.19.2@sha256:b8ec653c44235fbe910879145dac3597d66b0aaecf60bcbbe82580767771a839
-    command: ["run", "--storage.path=/var/lib/alloy/data", "/etc/alloy/config.alloy"]
-    volumes:
-      - ./alloy.config:/etc/alloy/config.alloy:ro
-    environment:
-      GRAFANA_REMOTE_WRITE_URL: ${GRAFANA_REMOTE_WRITE_URL:-}
-      GRAFANA_USERNAME: ${GRAFANA_USERNAME:-}
-      GRAFANA_TOKEN: ${GRAFANA_TOKEN:-}
-      # The VM has ~220 MB free; one scrape target needs far less than Go's
-      # default heap growth would take.
-      GOMEMLIMIT: 96MiB
-    depends_on:
-      - transitlateagain
-    profiles: ["vm"]
-    restart: unless-stopped
-    logging: *logging
 
 volumes:
   pgdata:

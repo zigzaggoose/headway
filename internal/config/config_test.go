@@ -204,6 +204,11 @@ func TestLoad_ValidatedRange_RejectsItsBoundary(t *testing.T) {
 			accepted: map[string]string{"PPROF_ADDR": "localhost:6060"},
 		},
 		{
+			name:     "a TLS certificate with no key",
+			env:      map[string]string{"HTTP_TLS_CERT_FILE": "/tls/origin.pem"},
+			accepted: map[string]string{"HTTP_TLS_CERT_FILE": "/tls/origin.pem", "HTTP_TLS_KEY_FILE": "/tls/origin.key"},
+		},
+		{
 			name:     "a rate limit of zero admits no request",
 			env:      map[string]string{"FEED_RATE_LIMIT_RPS": "0"},
 			accepted: map[string]string{"FEED_RATE_LIMIT_RPS": "0.5"},

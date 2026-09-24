@@ -117,6 +117,8 @@ type HTTPConfig struct {
 	ShutdownGrace   time.Duration // HTTP_SHUTDOWN_GRACE
 	RateLimit       float64       // HTTP_RATE_LIMIT_RPS, per IP
 	ClientIPHeader  string        // HTTP_CLIENT_IP_HEADER; empty means the connection's address
+	TLSCertFile     string        // HTTP_TLS_CERT_FILE; empty serves plain HTTP
+	TLSKeyFile      string        // HTTP_TLS_KEY_FILE
 	HistoryMaxDays  int           // HISTORY_MAX_DAYS
 	CacheTTL        time.Duration // CACHE_TTL
 	ReadyMaxFeedAge time.Duration // READY_MAX_FEED_AGE
@@ -193,6 +195,8 @@ func load(lookup func(string) (string, bool)) (*Config, error) {
 			ShutdownGrace:   l.dur("HTTP_SHUTDOWN_GRACE", 20*time.Second),
 			RateLimit:       l.float("HTTP_RATE_LIMIT_RPS", 50),
 			ClientIPHeader:  l.str("HTTP_CLIENT_IP_HEADER", ""),
+			TLSCertFile:     l.str("HTTP_TLS_CERT_FILE", ""),
+			TLSKeyFile:      l.str("HTTP_TLS_KEY_FILE", ""),
 			HistoryMaxDays:  l.int("HISTORY_MAX_DAYS", 90),
 			CacheTTL:        l.dur("CACHE_TTL", 45*time.Minute),
 			ReadyMaxFeedAge: l.dur("READY_MAX_FEED_AGE", 120*time.Second),
@@ -364,6 +368,10 @@ func (c *Config) validate() []error {
 	// Readiness would flap if a single missed poll could expire it.
 	if c.HTTP.ReadyMaxFeedAge <= c.Poll.Interval {
 		bad("READY_MAX_FEED_AGE (%s) must exceed FEED_POLL_INTERVAL (%s)", c.HTTP.ReadyMaxFeedAge, c.Poll.Interval)
+	}
+
+	if (c.HTTP.TLSCertFile == "") != (c.HTTP.TLSKeyFile == "") {
+		bad("HTTP_TLS_CERT_FILE and HTTP_TLS_KEY_FILE must be set together or not at all")
 	}
 
 	// pprof exposes goroutine stacks and heap contents; it must never listen
