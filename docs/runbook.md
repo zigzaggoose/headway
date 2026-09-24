@@ -49,6 +49,11 @@ this is data lost for good.
    `queue_cap` means the writer cannot keep up; the database is the suspect
    (step 4).
 
-**Test it:** `$C stop transitlateagain`, wait for the alert (15 minutes plus
-the evaluation interval), `$C start transitlateagain`, confirm it resolves.
+**In Grafana:** a Grafana-managed rule on that query (without `== 0`),
+threshold *is below 1*, evaluated every minute with a 5-minute pending period,
+*no data* set to *Alerting*, notifying the default email contact point. From
+the last row written to the email is about 20 minutes.
+
+**Test it:** `$C stop transitlateagain`, wait for the email, `$C start
+transitlateagain`, confirm it resolves.
 That window is lost data, so do it deliberately and rarely.
