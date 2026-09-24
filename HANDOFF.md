@@ -57,22 +57,24 @@ run is in `deploy/vm-bootstrap.md`; update with `git pull` and `docker compose
    Polls succeed, so nothing is wrong on our side. If it is still empty after a
    few days, record it in §9.1.
 
-## Decisions waiting on the user (Stage 4)
+## Stage 4: decided, in progress
 
-1. **`prometheus/client_golang`** — planned in §3 (chosen over hand-written
-   exposition for histogram bookkeeping), but still a new direct dependency:
-   `CLAUDE.md` says ask first. It would be the fourth.
-2. **How Grafana Cloud gets the metrics.** Recommended: `/metrics` on the
-   private admin port and Grafana Alloy on the VM pushing out, so nothing new
-   is public — but Alloy costs memory on a box with ~220 MB free, so measure it
-   first. The alternative is Grafana Cloud scraping a public `/metrics` with
-   basic auth. Either way the user creates the Grafana Cloud account.
-3. **A domain (~AUD 15 a year).** A Next.js page on an https host (Vercel) cannot
-   call a plain-http API — browsers block mixed content — and the API sends no
-   CORS headers. A domain gives HTTPS (Caddy or Cloudflare), makes `web/`
-   straightforward, and Cloudflare in front answers the many-source flood the
-   VM cannot. Behind any proxy the rate limiter's key has to change (see
-   `internal/api/ratelimit.go`).
+1. **`prometheus/client_golang` approved** (2026-09-24). Next: `/metrics` on the
+   private admin port, every §10.3 metric under the `transitlateagain_` prefix.
+   Needs its §15 dependency row.
+2. **Grafana Cloud:** the user is creating the account. Plan: Grafana Alloy on
+   the VM pushing out, so `/metrics` stays private. Measure Alloy's memory
+   first (~220 MB free). The Grafana token is a secret: it goes into a file on
+   the VM, never into the chat.
+3. **Domain bought: `transitlateagain.dev`.** `.dev` is HTTPS-only in every
+   browser (HSTS preload), so it shows nothing until TLS works. Plan:
+   Cloudflare free plan in front (TLS plus flood protection). The origin side
+   still to do: publish on a port Cloudflare proxies, lock 8080/80 to
+   Cloudflare's ranges in `DOCKER-USER`, and key the rate limiter on
+   `CF-Connecting-IP`, trusted only from Cloudflare addresses.
+4. **Renamed** from Headway to Transit Late Again (`b7b1059`); GitHub repo is
+   `zigzaggoose/transitlateagain`. Postgres role/database and the volume
+   (`headway_pgdata`) keep the old name on purpose (§15).
 
 ## Found and fixed this session
 
