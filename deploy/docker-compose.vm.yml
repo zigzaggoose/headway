@@ -17,6 +17,8 @@ services:
       HTTP_TLS_CERT_FILE: /tls/origin.pem
       HTTP_TLS_KEY_FILE: /tls/origin.key
       HTTP_CLIENT_IP_HEADER: CF-Connecting-IP
+      # web/ on Cloudflare Pages reads the API from the browser.
+      HTTP_CORS_ORIGIN: https://transitlateagain.dev
 
   alloy:
     # Pushes /metrics to Grafana Cloud (deploy/alloy.config). The admin port it

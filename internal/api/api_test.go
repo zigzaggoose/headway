@@ -417,3 +417,38 @@ func TestMetricsEndpoint_OnlyOnTheAdminHandler(t *testing.T) {
 		t.Errorf("public /metrics = %d, want 404", rec.Code)
 	}
 }
+
+func TestCORS_OneConfiguredOrigin_OnEveryPublicResponse(t *testing.T) {
+	const site = "https://transitlateagain.dev"
+	opts := func(origin string) Options {
+		return Options{
+			Cache: cache.New(time.Hour, func() time.Time { return now }), RateLimit: 1, CORSOrigin: origin,
+			Now: func() time.Time { return now }, Log: slog.New(slog.DiscardHandler),
+		}
+	}
+	get := func(h http.Handler, path string) *httptest.ResponseRecorder {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+		return rec
+	}
+
+	t.Run("an error and a 429 carry it too, so the site can read them", func(t *testing.T) {
+		h := NewHandler(opts(site))
+		for _, want := range []int{404, 429} {
+			rec := get(h, "/no-such-path")
+			if rec.Code != want || rec.Header().Get("Access-Control-Allow-Origin") != site {
+				t.Errorf("%d: Access-Control-Allow-Origin = %q, want %q", rec.Code, rec.Header().Get("Access-Control-Allow-Origin"), site)
+			}
+		}
+	})
+	t.Run("unconfigured, no browser on another site may read the API", func(t *testing.T) {
+		if v := get(NewHandler(opts("")), "/healthz").Header().Get("Access-Control-Allow-Origin"); v != "" {
+			t.Errorf("Access-Control-Allow-Origin = %q, want none", v)
+		}
+	})
+	t.Run("never on the admin port", func(t *testing.T) {
+		if v := get(NewAdminHandler(opts(site)), "/v1/admin/stats").Header().Get("Access-Control-Allow-Origin"); v != "" {
+			t.Errorf("admin Access-Control-Allow-Origin = %q, want none", v)
+		}
+	})
+}

@@ -91,7 +91,7 @@ migrations/            NNNN_name.sql, applied in order, checksummed.
 testdata/              recorded .pb fixtures. Tests never call the live API.
 ```
 
-Not yet built: `web/`. §5 is the destination layout. Create a package
+`web/` is a Next.js 16 static export (`cd web && npm run build`), built by Cloudflare Pages on push; its `AGENTS.md` says to read the bundled Next docs first. §5 is the destination layout. Create a package
 when its first real file is written — no placeholder files.
 
 ## Conventions

@@ -117,6 +117,7 @@ type HTTPConfig struct {
 	ShutdownGrace   time.Duration // HTTP_SHUTDOWN_GRACE
 	RateLimit       float64       // HTTP_RATE_LIMIT_RPS, per IP
 	ClientIPHeader  string        // HTTP_CLIENT_IP_HEADER; empty means the connection's address
+	CORSOrigin      string        // HTTP_CORS_ORIGIN; empty sends no CORS header
 	TLSCertFile     string        // HTTP_TLS_CERT_FILE; empty serves plain HTTP
 	TLSKeyFile      string        // HTTP_TLS_KEY_FILE
 	HistoryMaxDays  int           // HISTORY_MAX_DAYS
@@ -195,6 +196,7 @@ func load(lookup func(string) (string, bool)) (*Config, error) {
 			ShutdownGrace:   l.dur("HTTP_SHUTDOWN_GRACE", 20*time.Second),
 			RateLimit:       l.float("HTTP_RATE_LIMIT_RPS", 50),
 			ClientIPHeader:  l.str("HTTP_CLIENT_IP_HEADER", ""),
+			CORSOrigin:      l.str("HTTP_CORS_ORIGIN", ""),
 			TLSCertFile:     l.str("HTTP_TLS_CERT_FILE", ""),
 			TLSKeyFile:      l.str("HTTP_TLS_KEY_FILE", ""),
 			HistoryMaxDays:  l.int("HISTORY_MAX_DAYS", 90),
@@ -370,6 +372,13 @@ func (c *Config) validate() []error {
 		bad("READY_MAX_FEED_AGE (%s) must exceed FEED_POLL_INTERVAL (%s)", c.HTTP.ReadyMaxFeedAge, c.Poll.Interval)
 	}
 
+	// A browser compares the header to the page's origin byte for byte, so a
+	// trailing slash or a path would silently block the site.
+	if o := c.HTTP.CORSOrigin; o != "" {
+		if u, err := url.Parse(o); err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" || u.Path != "" || u.RawQuery != "" {
+			bad("HTTP_CORS_ORIGIN is %q, want an origin such as https://transitlateagain.dev: scheme and host, no path", o)
+		}
+	}
 	if (c.HTTP.TLSCertFile == "") != (c.HTTP.TLSKeyFile == "") {
 		bad("HTTP_TLS_CERT_FILE and HTTP_TLS_KEY_FILE must be set together or not at all")
 	}

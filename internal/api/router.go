@@ -27,6 +27,7 @@ type Options struct {
 	HistoryMaxDays  int
 	RateLimit       float64 // HTTP_RATE_LIMIT_RPS per client IP; 0 disables it
 	ClientIPHeader  string  // HTTP_CLIENT_IP_HEADER; empty means the connection's address
+	CORSOrigin      string  // HTTP_CORS_ORIGIN; the one site allowed to read the API from a browser
 	OnTime          config.Thresholds
 	ReadyMaxFeedAge time.Duration
 	Now             func() time.Time
@@ -60,7 +61,23 @@ func NewHandler(o Options) http.Handler {
 	notFound(mux)
 	// The limit runs inside the middleware, so a 429 still gets a request id
 	// and an access log line.
-	return s.middleware(s.limit(mux))
+	h := s.middleware(s.limit(mux))
+	if o.CORSOrigin != "" {
+		h = cors(o.CORSOrigin, h)
+	}
+	return h
+}
+
+// cors lets the one site that renders this API read its responses from a
+// browser (§7). Every endpoint is a GET with no custom request headers, so
+// browsers never preflight and there is no OPTIONS handling. It is set before
+// anything else writes, so errors and 429s are readable too.
+func cors(origin string, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", origin)
+		w.Header().Set("Access-Control-Expose-Headers", "Retry-After, X-Request-Id")
+		next.ServeHTTP(w, r)
+	})
 }
 
 // NewAdminHandler serves the operator's routes. It is a separate handler for

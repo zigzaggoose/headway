@@ -204,6 +204,11 @@ func TestLoad_ValidatedRange_RejectsItsBoundary(t *testing.T) {
 			accepted: map[string]string{"PPROF_ADDR": "localhost:6060"},
 		},
 		{
+			name:     "a CORS origin with a trailing slash, which a browser never matches",
+			env:      map[string]string{"HTTP_CORS_ORIGIN": "https://transitlateagain.dev/"},
+			accepted: map[string]string{"HTTP_CORS_ORIGIN": "https://transitlateagain.dev"},
+		},
+		{
 			name:     "a TLS certificate with no key",
 			env:      map[string]string{"HTTP_TLS_CERT_FILE": "/tls/origin.pem"},
 			accepted: map[string]string{"HTTP_TLS_CERT_FILE": "/tls/origin.pem", "HTTP_TLS_KEY_FILE": "/tls/origin.key"},
