@@ -147,31 +147,32 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	srv := &http.Server{
-		Handler: api.NewHandler(api.Options{
-			Cache: latest,
-			Ping:  db.Ping,
-			ScheduleLoaded: func() bool {
-				for _, f := range cfg.Feeds {
-					if matcher.Loaded(f.ID) != 0 {
-						return true
-					}
+	apiOpts := api.Options{
+		Cache: latest,
+		Ping:  db.Ping,
+		ScheduleLoaded: func() bool {
+			for _, f := range cfg.Feeds {
+				if matcher.Loaded(f.ID) != 0 {
+					return true
 				}
-				return false
-			},
-			OnTime:          cfg.OnTime,
-			ReadyMaxFeedAge: cfg.HTTP.ReadyMaxFeedAge,
-			Schedules:       matcher.Schedules,
-			History:         db.History,
-			HistoryMaxDays:  cfg.HTTP.HistoryMaxDays,
-			RateLimit:       cfg.HTTP.RateLimit,
-			PipelineStats:   pipeline.Stats,
-			MatchCounts:     matcher.LastCounts,
-			RequestsToday:   limiter.Used,
-			Maintenance:     db.Maintenance,
-			Now:             time.Now,
-			Log:             log,
-		}),
+			}
+			return false
+		},
+		OnTime:          cfg.OnTime,
+		ReadyMaxFeedAge: cfg.HTTP.ReadyMaxFeedAge,
+		Schedules:       matcher.Schedules,
+		History:         db.History,
+		HistoryMaxDays:  cfg.HTTP.HistoryMaxDays,
+		RateLimit:       cfg.HTTP.RateLimit,
+		PipelineStats:   pipeline.Stats,
+		MatchCounts:     matcher.LastCounts,
+		RequestsToday:   limiter.Used,
+		Maintenance:     db.Maintenance,
+		Now:             time.Now,
+		Log:             log,
+	}
+	srv := &http.Server{
+		Handler:           api.NewHandler(apiOpts),
 		ReadHeaderTimeout: cfg.HTTP.ReadTimeout,
 		ReadTimeout:       cfg.HTTP.ReadTimeout,
 		WriteTimeout:      cfg.HTTP.WriteTimeout,
@@ -206,6 +207,27 @@ func main() {
 			}
 		}()
 		log.Warn("pprof listening", "component", "main", "addr", cfg.HTTP.PprofAddr)
+	}
+
+	// Admin stats on their own server, like the profiler, but not forced to
+	// loopback: in Compose the container must listen on all interfaces, and
+	// the host-side port binding (127.0.0.1 only) is what keeps it private.
+	var admin *http.Server
+	if cfg.HTTP.AdminAddr != "" {
+		admin = &http.Server{
+			Addr:              cfg.HTTP.AdminAddr,
+			Handler:           api.NewAdminHandler(apiOpts),
+			ReadHeaderTimeout: cfg.HTTP.ReadTimeout,
+			ReadTimeout:       cfg.HTTP.ReadTimeout,
+			WriteTimeout:      cfg.HTTP.WriteTimeout,
+		}
+		go func() {
+			if err := admin.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
+				// Losing the stats page is no reason to stop ingesting.
+				log.Error("admin server stopped", "component", "main", "err", err.Error())
+			}
+		}()
+		log.Info("admin listening", "component", "main", "addr", cfg.HTTP.AdminAddr)
 	}
 
 	// The schedule gets its own client because its timeout is the schedule's
@@ -273,6 +295,9 @@ func main() {
 	}
 	if profiler != nil {
 		_ = profiler.Close() // a profile in progress is not worth waiting for
+	}
+	if admin != nil {
+		_ = admin.Close() // a stats snapshot in progress is not worth waiting for
 	}
 	cancelDrain()
 	pollers.Wait()    // step 3: no new observations can be produced

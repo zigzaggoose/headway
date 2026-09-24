@@ -120,6 +120,7 @@ type HTTPConfig struct {
 	CacheTTL        time.Duration // CACHE_TTL
 	ReadyMaxFeedAge time.Duration // READY_MAX_FEED_AGE
 	PprofAddr       string        // PPROF_ADDR; empty means off
+	AdminAddr       string        // ADMIN_ADDR; empty means off
 }
 
 // DBConfig governs the pgx pool.
@@ -194,6 +195,7 @@ func load(lookup func(string) (string, bool)) (*Config, error) {
 			CacheTTL:        l.dur("CACHE_TTL", 45*time.Minute),
 			ReadyMaxFeedAge: l.dur("READY_MAX_FEED_AGE", 120*time.Second),
 			PprofAddr:       l.str("PPROF_ADDR", ""),
+			AdminAddr:       l.str("ADMIN_ADDR", "127.0.0.1:8081"),
 		},
 		DB: DBConfig{
 			MaxConns: l.int("DB_MAX_CONNS", 10),

@@ -833,7 +833,10 @@ Same shape as the stop history, reading `otp_route_hourly`, without `stop_id` or
 
 #### `GET /v1/admin/stats`
 
-Operational summary. Not a public contract; may change freely.
+Operational summary. Not a public contract; may change freely. Served on
+`ADMIN_ADDR`, never on `HTTP_ADDR`: the public address answers this path with
+404. On the VM it is published on the host's loopback only, so it is read over
+SSH (`ssh root@<vm> curl -s localhost:8081/v1/admin/stats`).
 
 ```json
 {
@@ -1063,6 +1066,7 @@ All configuration is environment variables, read once at startup into `config.Co
 | `HTTP_SHUTDOWN_GRACE` | duration | `20s` | no | Must exceed `INGEST_FLUSH_INTERVAL` plus the time to write one batch, or shutdown drops a batch. |
 | `HTTP_RATE_LIMIT_RPS` | float | `50` | no | Per-IP. Set too low and the load test fails against itself. |
 | `READY_MAX_FEED_AGE` | duration | `120s` | no | `/readyz` returns 503 when no feed has succeeded within this window (§7.1). Shorter than `FEED_POLL_INTERVAL` and readiness flaps. |
+| `ADMIN_ADDR` | host:port | `127.0.0.1:8081` | no | `/v1/admin/stats` listens here, on its own server; empty is off. Not forced to loopback, unlike `PPROF_ADDR`: Compose sets `:8081` inside the container and publishes it on `127.0.0.1` of the host, which is what keeps it private. |
 | `PPROF_ADDR` | host:port | empty (off) | no | When set, `net/http/pprof` listens here, on its own server. Must be a loopback address — config refuses anything else — because profiles expose goroutine stacks and heap contents. |
 | `DB_MAX_CONNS` | int | `10` | no | On a 1 GB VM, Postgres plus a large pool will OOM. The writer needs one; the API needs the rest. |
 | `LOG_LEVEL` | `debug`/`info`/`warn`/`error` | `info` | no | `debug` logs every decoded update and will fill the disk within a day. |
@@ -1759,6 +1763,7 @@ Append-only. To reverse a decision, add a row that names the one it supersedes.
 | 2026-09-24 | `PPROF_ADDR` (default off, loopback enforced by config) runs `net/http/pprof` on a second server, closed at shutdown step 2. Asked and approved (a new goroutine and listener). | §12 Stage 3 asks for profiling under load on a non-public port; a second server means no path on the API address can ever reach it. | Profiling only from benchmarks; mounting pprof on the API mux. |
 | 2026-09-24 | The rollup also writes one exact all-routes row per stop and hour (`route_id = '~all'`, `store.AllRoutes`), and unfiltered stop history reads only those. The history query is built per filter combination instead of `$n IS NULL OR …`. No worker pool between decode and match. | Profiled under load: stop history read ~24,000 rows a request (212 % CPU at 50 RPS). Aggregating in SQL was tried and measured first and was 120× worse — 83 ms at best, 13.4 s once the prepared statement's generic plan estimated the `IS NULL OR` clause at one row. Computing once at rollup time made it 5× faster, 15× cheaper in CPU, and exact. A poll's decode and match is 6.6 ms of a 15 s interval. | SQL aggregation with window functions (measured, rejected); caching history responses (stale by design, and memory the VM lacks); a worker pool (nothing to parallelise). |
 | 2026-09-24 | Production VM: Ubuntu 24.04 LTS, no BinaryLane backups, SSH by key only (`00-headway.conf` overrides the provider's `10-` file), ufw allowing SSH alone. The API is public on 8080 through Docker's own port publishing, which ufw does not govern; Postgres is private because it is never published. | 24.04 is what the plan and Docker's install path were written against. Everything but the captured realtime history rebuilds from git and TfNSW, and the history is not yet worth 40 % on the bill. | Ubuntu 26.04 (newer, less mileage); onsite backups (+$2/month); ufw rules for 8080 (inert under Docker, so they would only mislead). |
+| 2026-09-24 | `/v1/admin/stats` moves off the public address onto `ADMIN_ADDR` (default `127.0.0.1:8081`), its own server closed at shutdown step 2 beside the profiler; Compose publishes it as `127.0.0.1:8081`. Asked and approved (a new goroutine and listener). | Once deployed, the endpoint told anyone request counts, queue state and database size. It holds no secrets, but it is the operator's view, not the public's. | A source-IP check on the public listener (Docker's userland proxy rewrites IPv6 and host-originated clients to a private gateway address, so it would pass strangers); a shared token (auth is a §2 non-goal); mounting it on the pprof server (loopback-enforced, so unreachable from the host through Docker). |
 
 ---
 

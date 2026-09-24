@@ -45,11 +45,16 @@ services:
       # Overrides the laptop's localhost URL from .env: inside Compose the
       # database is the postgres service.
       DATABASE_URL: postgres://headway:${POSTGRES_PASSWORD}@postgres:5432/headway?sslmode=disable
+      # All interfaces inside the container; the port binding below is what
+      # keeps it off the internet.
+      ADMIN_ADDR: ":8081"
     depends_on:
       postgres:
         condition: service_healthy
     ports:
       - "8080:8080"
+      # Host loopback only: reach it with ssh, never from outside (§7).
+      - "127.0.0.1:8081:8081"
     # Shutdown drains HTTP for up to HTTP_SHUTDOWN_GRACE and then the writer
     # for up to the same again (§9.4). Docker's default of 10s would SIGKILL
     # mid-flush and lose the final batch.

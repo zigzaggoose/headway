@@ -52,13 +52,26 @@ func NewHandler(o Options) http.Handler {
 	mux.HandleFunc("GET /v1/stops/{stop_id}/now", s.stopNow)
 	mux.HandleFunc("GET /v1/lines/{route_id}/history", s.lineHistory)
 	mux.HandleFunc("GET /v1/stops/{stop_id}/history", s.stopHistory)
-	mux.HandleFunc("GET /v1/admin/stats", s.adminStats)
-	// Without this the mux answers unknown paths in plain text, and §7.2 says
-	// every non-2xx response carries the envelope.
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		writeError(w, r, http.StatusNotFound, "not_found", "no endpoint at "+r.URL.Path)
-	})
+	notFound(mux)
 	// The limit runs inside the middleware, so a 429 still gets a request id
 	// and an access log line.
 	return s.middleware(s.limit(mux))
+}
+
+// NewAdminHandler serves the operator's routes. It is a separate handler for
+// a separate listener, so no path on the public address can reach it (§7).
+func NewAdminHandler(o Options) http.Handler {
+	s := &server{o}
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /v1/admin/stats", s.adminStats)
+	notFound(mux)
+	return s.middleware(mux)
+}
+
+// Without this the mux answers unknown paths in plain text, and §7.2 says
+// every non-2xx response carries the envelope.
+func notFound(mux *http.ServeMux) {
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		writeError(w, r, http.StatusNotFound, "not_found", "no endpoint at "+r.URL.Path)
+	})
 }

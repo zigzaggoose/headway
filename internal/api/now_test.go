@@ -161,11 +161,19 @@ func TestStopNow_BadInput(t *testing.T) {
 	}
 }
 
+func TestAdminStats_PublicHandler_NotFound(t *testing.T) {
+	h := harness{h: NewHandler(Options{Now: func() time.Time { return now }, Log: slog.New(slog.DiscardHandler)})}
+
+	rec, body := h.get(t, "/v1/admin/stats")
+
+	assertEnvelope(t, rec, body, 404, "not_found")
+}
+
 func TestAdminStats_ReportsEverySource(t *testing.T) {
 	c := cache.New(time.Hour, func() time.Time { return now })
 	c.Update("trains", now.Add(-9*time.Second), nil)
 	oldest := time.Date(2026, 9, 16, 0, 0, 0, 0, time.UTC)
-	h := harness{h: NewHandler(Options{
+	h := harness{h: NewAdminHandler(Options{
 		Cache:         c,
 		Schedules:     func() []*match.Schedule { return []*match.Schedule{fixtureSchedule()} },
 		PipelineStats: func() ingest.Stats { return ingest.Stats{QueueLen: 3, QueueCap: 8192, Written: 100} },
