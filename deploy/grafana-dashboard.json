@@ -1,760 +1,765 @@
 {
-  "id": null,
-  "title": "Transit Late Again",
-  "uid": "transitlateagain",
-  "tags": [
-    "transitlateagain"
-  ],
-  "timezone": "Australia/Sydney",
-  "refresh": "1m",
-  "time": {
-    "from": "now-6h",
-    "to": "now"
+  "apiVersion": "dashboard.grafana.app/v1",
+  "kind": "Dashboard",
+  "metadata": {
+    "name": "transitlateagain"
   },
-  "schemaVersion": 39,
-  "version": 1,
-  "editable": true,
-  "panels": [
-    {
-      "id": 1,
-      "type": "stat",
-      "title": "Rows written / min",
-      "description": "Rows actually inserted. Zero for 15 minutes fires TransitLateAgainIngestStopped.",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "gridPos": {
-        "x": 0,
-        "y": 0,
-        "w": 4,
-        "h": 4
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "sum(rate(transitlateagain_rows_written_total[5m])) * 60",
-          "legendFormat": "",
-          "refId": "A"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short",
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "red",
-                "value": null
-              },
-              {
-                "color": "green",
-                "value": 1
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "colorMode": "value",
-        "graphMode": "area",
-        "textMode": "value"
-      }
+  "spec": {
+    "title": "Transit Late Again",
+    "tags": [
+      "transitlateagain"
+    ],
+    "timezone": "Australia/Sydney",
+    "refresh": "1m",
+    "time": {
+      "from": "now-6h",
+      "to": "now"
     },
-    {
-      "id": 2,
-      "type": "stat",
-      "title": "Freshness p95",
-      "description": "Write time minus feed_ts. The headline number (\u00a713).",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "gridPos": {
-        "x": 4,
-        "y": 0,
-        "w": 4,
-        "h": 4
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(transitlateagain_freshness_lag_seconds_bucket[5m])))",
-          "legendFormat": "",
-          "refId": "A"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "s",
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "red",
-                "value": 60
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "colorMode": "value",
-        "graphMode": "area",
-        "textMode": "value"
-      }
-    },
-    {
-      "id": 3,
-      "type": "stat",
-      "title": "Queue length",
-      "description": "Ingest channel occupancy; the capacity is 8192.",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "gridPos": {
-        "x": 8,
-        "y": 0,
-        "w": 4,
-        "h": 4
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "transitlateagain_queue_length",
-          "legendFormat": "",
-          "refId": "A"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short",
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "orange",
-                "value": 4096
-              },
-              {
-                "color": "red",
-                "value": 7000
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "colorMode": "value",
-        "graphMode": "area",
-        "textMode": "value"
-      }
-    },
-    {
-      "id": 4,
-      "type": "stat",
-      "title": "Partitions",
-      "description": "Daily observation partitions: RETENTION_DAYS back plus the lookahead.",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "gridPos": {
-        "x": 12,
-        "y": 0,
-        "w": 4,
-        "h": 4
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "transitlateagain_partitions",
-          "legendFormat": "",
-          "refId": "A"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short"
-        },
-        "overrides": []
-      },
-      "options": {
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "colorMode": "value",
-        "graphMode": "area",
-        "textMode": "value"
-      }
-    },
-    {
-      "id": 5,
-      "type": "stat",
-      "title": "Default partition rows",
-      "description": "Should always be 0: rows here escape retention.",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "gridPos": {
-        "x": 16,
-        "y": 0,
-        "w": 4,
-        "h": 4
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "transitlateagain_default_partition_rows",
-          "legendFormat": "",
-          "refId": "A"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short",
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "red",
-                "value": 1
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "colorMode": "value",
-        "graphMode": "area",
-        "textMode": "value"
-      }
-    },
-    {
-      "id": 6,
-      "type": "stat",
-      "title": "API p95",
-      "description": "Public routes only.",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "gridPos": {
-        "x": 20,
-        "y": 0,
-        "w": 4,
-        "h": 4
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(transitlateagain_http_request_duration_seconds_bucket{route!~\"GET /metrics|GET /v1/admin/stats|unrouted\"}[5m])))",
-          "legendFormat": "",
-          "refId": "A"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "s",
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "red",
-                "value": 0.5
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "colorMode": "value",
-        "graphMode": "area",
-        "textMode": "value"
-      }
-    },
-    {
-      "id": 7,
-      "type": "timeseries",
-      "title": "Ingest rate",
-      "description": "Rows written after the change filter, and updates decoded per feed before it.",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "gridPos": {
-        "x": 0,
-        "y": 4,
-        "w": 12,
-        "h": 8
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "sum(rate(transitlateagain_rows_written_total[5m])) * 60",
-          "legendFormat": "rows written / min",
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "sum by (feed_id) (rate(transitlateagain_updates_decoded_total[5m])) * 60",
-          "legendFormat": "{{feed_id}} decoded / min",
-          "refId": "B"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short"
-        },
-        "overrides": []
-      },
-      "options": {}
-    },
-    {
-      "id": 8,
-      "type": "timeseries",
-      "title": "Freshness p95 by feed",
-      "description": "",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "gridPos": {
-        "x": 12,
-        "y": 4,
-        "w": 12,
-        "h": 8
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "histogram_quantile(0.95, sum by (le, feed_id) (rate(transitlateagain_freshness_lag_seconds_bucket[5m])))",
-          "legendFormat": "{{feed_id}}",
-          "refId": "A"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "s"
-        },
-        "overrides": []
-      },
-      "options": {}
-    },
-    {
-      "id": 9,
-      "type": "timeseries",
-      "title": "Match rate, 15-minute window",
-      "description": "Matched over matched plus unmatched, ADDED trips excluded (\u00a79.1 case 2). A feed publishing nothing shows no line.",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "gridPos": {
-        "x": 0,
-        "y": 12,
-        "w": 12,
-        "h": 8
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "sum by (feed_id) (increase(transitlateagain_matched_total[15m])) / (sum by (feed_id) (increase(transitlateagain_matched_total[15m])) + sum by (feed_id) (increase(transitlateagain_unmatched_total{reason!=\"added\"}[15m])))",
-          "legendFormat": "{{feed_id}}",
-          "refId": "A"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "percentunit",
-          "min": 0,
-          "max": 1
-        },
-        "overrides": []
-      },
-      "options": {}
-    },
-    {
-      "id": 10,
-      "type": "timeseries",
-      "title": "Queue length and drops",
-      "description": "",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "gridPos": {
-        "x": 12,
-        "y": 12,
-        "w": 12,
-        "h": 8
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "transitlateagain_queue_length",
-          "legendFormat": "queue length",
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "sum(increase(transitlateagain_dropped_total[5m]))",
-          "legendFormat": "dropped, 5 min",
-          "refId": "B"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short"
-        },
-        "overrides": []
-      },
-      "options": {}
-    },
-    {
-      "id": 11,
-      "type": "timeseries",
-      "title": "API p95 by route",
-      "description": "",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "gridPos": {
-        "x": 0,
-        "y": 20,
-        "w": 12,
-        "h": 8
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "histogram_quantile(0.95, sum by (le, route) (rate(transitlateagain_http_request_duration_seconds_bucket{route!~\"GET /metrics|GET /v1/admin/stats|unrouted\"}[5m])))",
-          "legendFormat": "{{route}}",
-          "refId": "A"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "s"
-        },
-        "overrides": []
-      },
-      "options": {}
-    },
-    {
-      "id": 12,
-      "type": "timeseries",
-      "title": "API requests / min by status",
-      "description": "",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "gridPos": {
-        "x": 12,
-        "y": 20,
-        "w": 12,
-        "h": 8
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "sum by (status) (rate(transitlateagain_http_requests_total{route!~\"GET /metrics|GET /v1/admin/stats|unrouted\"}[5m])) * 60",
-          "legendFormat": "{{status}}",
-          "refId": "A"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short"
-        },
-        "overrides": []
-      },
-      "options": {}
-    },
-    {
-      "id": 13,
-      "type": "timeseries",
-      "title": "Upstream requests by outcome, 15 min",
-      "description": "Every TfNSW request, realtime and schedule. quota or unauthorized means act now.",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "gridPos": {
-        "x": 0,
-        "y": 28,
-        "w": 12,
-        "h": 8
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "sum by (outcome) (increase(transitlateagain_feed_requests_total[15m]))",
-          "legendFormat": "{{outcome}}",
-          "refId": "A"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short"
-        },
-        "overrides": []
-      },
-      "options": {}
-    },
-    {
-      "id": 14,
-      "type": "timeseries",
-      "title": "Feed age",
-      "description": "Fetch time minus the feed's own header timestamp at the last successful poll.",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "gridPos": {
-        "x": 12,
-        "y": 28,
-        "w": 12,
-        "h": 8
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "transitlateagain_feed_age_seconds",
-          "legendFormat": "{{feed_id}}",
-          "refId": "A"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "s"
-        },
-        "overrides": []
-      },
-      "options": {}
-    },
-    {
-      "id": 15,
-      "type": "timeseries",
-      "title": "Rollup lag",
-      "description": "Now minus the rollup watermark. Hours roll up 3 h after they end, so 3\u20134 h is normal.",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "gridPos": {
-        "x": 0,
-        "y": 36,
-        "w": 12,
-        "h": 8
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "transitlateagain_rollup_lag_seconds",
-          "legendFormat": "",
-          "refId": "A"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "s"
-        },
-        "overrides": []
-      },
-      "options": {}
-    },
-    {
-      "id": 16,
-      "type": "stat",
-      "title": "Any feed stale",
-      "description": "1 when a feed's header timestamp has not advanced for FEED_STALE_POLLS polls.",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "gridPos": {
-        "x": 12,
-        "y": 36,
-        "w": 12,
-        "h": 8
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "max(transitlateagain_feed_stale)",
-          "legendFormat": "",
-          "refId": "A"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short",
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "red",
-                "value": 1
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "colorMode": "value",
-        "graphMode": "area",
-        "textMode": "value"
-      }
-    }
-  ],
-  "templating": {
-    "list": [
+    "schemaVersion": 39,
+    "version": 1,
+    "editable": true,
+    "panels": [
       {
-        "name": "datasource",
-        "label": "Data source",
-        "type": "datasource",
-        "query": "prometheus",
-        "current": {},
-        "hide": 0,
-        "refresh": 1,
-        "options": []
+        "id": 1,
+        "type": "stat",
+        "title": "Rows written / min",
+        "description": "Rows actually inserted. Zero for 15 minutes fires TransitLateAgainIngestStopped.",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
+        "gridPos": {
+          "x": 0,
+          "y": 0,
+          "w": 4,
+          "h": 4
+        },
+        "targets": [
+          {
+            "datasource": {
+              "type": "prometheus",
+              "uid": "${datasource}"
+            },
+            "expr": "sum(rate(transitlateagain_rows_written_total[5m])) * 60",
+            "legendFormat": "",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {
+                  "color": "red",
+                  "value": null
+                },
+                {
+                  "color": "green",
+                  "value": 1
+                }
+              ]
+            }
+          },
+          "overrides": []
+        },
+        "options": {
+          "reduceOptions": {
+            "calcs": [
+              "lastNotNull"
+            ],
+            "fields": "",
+            "values": false
+          },
+          "colorMode": "value",
+          "graphMode": "area",
+          "textMode": "value"
+        }
+      },
+      {
+        "id": 2,
+        "type": "stat",
+        "title": "Freshness p95",
+        "description": "Write time minus feed_ts. The headline number (\u00a713).",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
+        "gridPos": {
+          "x": 4,
+          "y": 0,
+          "w": 4,
+          "h": 4
+        },
+        "targets": [
+          {
+            "datasource": {
+              "type": "prometheus",
+              "uid": "${datasource}"
+            },
+            "expr": "histogram_quantile(0.95, sum by (le) (rate(transitlateagain_freshness_lag_seconds_bucket[5m])))",
+            "legendFormat": "",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "s",
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {
+                  "color": "green",
+                  "value": null
+                },
+                {
+                  "color": "red",
+                  "value": 60
+                }
+              ]
+            }
+          },
+          "overrides": []
+        },
+        "options": {
+          "reduceOptions": {
+            "calcs": [
+              "lastNotNull"
+            ],
+            "fields": "",
+            "values": false
+          },
+          "colorMode": "value",
+          "graphMode": "area",
+          "textMode": "value"
+        }
+      },
+      {
+        "id": 3,
+        "type": "stat",
+        "title": "Queue length",
+        "description": "Ingest channel occupancy; the capacity is 8192.",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
+        "gridPos": {
+          "x": 8,
+          "y": 0,
+          "w": 4,
+          "h": 4
+        },
+        "targets": [
+          {
+            "datasource": {
+              "type": "prometheus",
+              "uid": "${datasource}"
+            },
+            "expr": "transitlateagain_queue_length",
+            "legendFormat": "",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {
+                  "color": "green",
+                  "value": null
+                },
+                {
+                  "color": "orange",
+                  "value": 4096
+                },
+                {
+                  "color": "red",
+                  "value": 7000
+                }
+              ]
+            }
+          },
+          "overrides": []
+        },
+        "options": {
+          "reduceOptions": {
+            "calcs": [
+              "lastNotNull"
+            ],
+            "fields": "",
+            "values": false
+          },
+          "colorMode": "value",
+          "graphMode": "area",
+          "textMode": "value"
+        }
+      },
+      {
+        "id": 4,
+        "type": "stat",
+        "title": "Partitions",
+        "description": "Daily observation partitions: RETENTION_DAYS back plus the lookahead.",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
+        "gridPos": {
+          "x": 12,
+          "y": 0,
+          "w": 4,
+          "h": 4
+        },
+        "targets": [
+          {
+            "datasource": {
+              "type": "prometheus",
+              "uid": "${datasource}"
+            },
+            "expr": "transitlateagain_partitions",
+            "legendFormat": "",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short"
+          },
+          "overrides": []
+        },
+        "options": {
+          "reduceOptions": {
+            "calcs": [
+              "lastNotNull"
+            ],
+            "fields": "",
+            "values": false
+          },
+          "colorMode": "value",
+          "graphMode": "area",
+          "textMode": "value"
+        }
+      },
+      {
+        "id": 5,
+        "type": "stat",
+        "title": "Default partition rows",
+        "description": "Should always be 0: rows here escape retention.",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
+        "gridPos": {
+          "x": 16,
+          "y": 0,
+          "w": 4,
+          "h": 4
+        },
+        "targets": [
+          {
+            "datasource": {
+              "type": "prometheus",
+              "uid": "${datasource}"
+            },
+            "expr": "transitlateagain_default_partition_rows",
+            "legendFormat": "",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {
+                  "color": "green",
+                  "value": null
+                },
+                {
+                  "color": "red",
+                  "value": 1
+                }
+              ]
+            }
+          },
+          "overrides": []
+        },
+        "options": {
+          "reduceOptions": {
+            "calcs": [
+              "lastNotNull"
+            ],
+            "fields": "",
+            "values": false
+          },
+          "colorMode": "value",
+          "graphMode": "area",
+          "textMode": "value"
+        }
+      },
+      {
+        "id": 6,
+        "type": "stat",
+        "title": "API p95",
+        "description": "Public routes only.",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
+        "gridPos": {
+          "x": 20,
+          "y": 0,
+          "w": 4,
+          "h": 4
+        },
+        "targets": [
+          {
+            "datasource": {
+              "type": "prometheus",
+              "uid": "${datasource}"
+            },
+            "expr": "histogram_quantile(0.95, sum by (le) (rate(transitlateagain_http_request_duration_seconds_bucket{route!~\"GET /metrics|GET /v1/admin/stats|unrouted\"}[5m])))",
+            "legendFormat": "",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "s",
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {
+                  "color": "green",
+                  "value": null
+                },
+                {
+                  "color": "red",
+                  "value": 0.5
+                }
+              ]
+            }
+          },
+          "overrides": []
+        },
+        "options": {
+          "reduceOptions": {
+            "calcs": [
+              "lastNotNull"
+            ],
+            "fields": "",
+            "values": false
+          },
+          "colorMode": "value",
+          "graphMode": "area",
+          "textMode": "value"
+        }
+      },
+      {
+        "id": 7,
+        "type": "timeseries",
+        "title": "Ingest rate",
+        "description": "Rows written after the change filter, and updates decoded per feed before it.",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
+        "gridPos": {
+          "x": 0,
+          "y": 4,
+          "w": 12,
+          "h": 8
+        },
+        "targets": [
+          {
+            "datasource": {
+              "type": "prometheus",
+              "uid": "${datasource}"
+            },
+            "expr": "sum(rate(transitlateagain_rows_written_total[5m])) * 60",
+            "legendFormat": "rows written / min",
+            "refId": "A"
+          },
+          {
+            "datasource": {
+              "type": "prometheus",
+              "uid": "${datasource}"
+            },
+            "expr": "sum by (feed_id) (rate(transitlateagain_updates_decoded_total[5m])) * 60",
+            "legendFormat": "{{feed_id}} decoded / min",
+            "refId": "B"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short"
+          },
+          "overrides": []
+        },
+        "options": {}
+      },
+      {
+        "id": 8,
+        "type": "timeseries",
+        "title": "Freshness p95 by feed",
+        "description": "",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
+        "gridPos": {
+          "x": 12,
+          "y": 4,
+          "w": 12,
+          "h": 8
+        },
+        "targets": [
+          {
+            "datasource": {
+              "type": "prometheus",
+              "uid": "${datasource}"
+            },
+            "expr": "histogram_quantile(0.95, sum by (le, feed_id) (rate(transitlateagain_freshness_lag_seconds_bucket[5m])))",
+            "legendFormat": "{{feed_id}}",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "s"
+          },
+          "overrides": []
+        },
+        "options": {}
+      },
+      {
+        "id": 9,
+        "type": "timeseries",
+        "title": "Match rate, 15-minute window",
+        "description": "Matched over matched plus unmatched, ADDED trips excluded (\u00a79.1 case 2). A feed publishing nothing shows no line.",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
+        "gridPos": {
+          "x": 0,
+          "y": 12,
+          "w": 12,
+          "h": 8
+        },
+        "targets": [
+          {
+            "datasource": {
+              "type": "prometheus",
+              "uid": "${datasource}"
+            },
+            "expr": "sum by (feed_id) (increase(transitlateagain_matched_total[15m])) / (sum by (feed_id) (increase(transitlateagain_matched_total[15m])) + sum by (feed_id) (increase(transitlateagain_unmatched_total{reason!=\"added\"}[15m])))",
+            "legendFormat": "{{feed_id}}",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percentunit",
+            "min": 0,
+            "max": 1
+          },
+          "overrides": []
+        },
+        "options": {}
+      },
+      {
+        "id": 10,
+        "type": "timeseries",
+        "title": "Queue length and drops",
+        "description": "",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
+        "gridPos": {
+          "x": 12,
+          "y": 12,
+          "w": 12,
+          "h": 8
+        },
+        "targets": [
+          {
+            "datasource": {
+              "type": "prometheus",
+              "uid": "${datasource}"
+            },
+            "expr": "transitlateagain_queue_length",
+            "legendFormat": "queue length",
+            "refId": "A"
+          },
+          {
+            "datasource": {
+              "type": "prometheus",
+              "uid": "${datasource}"
+            },
+            "expr": "sum(increase(transitlateagain_dropped_total[5m]))",
+            "legendFormat": "dropped, 5 min",
+            "refId": "B"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short"
+          },
+          "overrides": []
+        },
+        "options": {}
+      },
+      {
+        "id": 11,
+        "type": "timeseries",
+        "title": "API p95 by route",
+        "description": "",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
+        "gridPos": {
+          "x": 0,
+          "y": 20,
+          "w": 12,
+          "h": 8
+        },
+        "targets": [
+          {
+            "datasource": {
+              "type": "prometheus",
+              "uid": "${datasource}"
+            },
+            "expr": "histogram_quantile(0.95, sum by (le, route) (rate(transitlateagain_http_request_duration_seconds_bucket{route!~\"GET /metrics|GET /v1/admin/stats|unrouted\"}[5m])))",
+            "legendFormat": "{{route}}",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "s"
+          },
+          "overrides": []
+        },
+        "options": {}
+      },
+      {
+        "id": 12,
+        "type": "timeseries",
+        "title": "API requests / min by status",
+        "description": "",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
+        "gridPos": {
+          "x": 12,
+          "y": 20,
+          "w": 12,
+          "h": 8
+        },
+        "targets": [
+          {
+            "datasource": {
+              "type": "prometheus",
+              "uid": "${datasource}"
+            },
+            "expr": "sum by (status) (rate(transitlateagain_http_requests_total{route!~\"GET /metrics|GET /v1/admin/stats|unrouted\"}[5m])) * 60",
+            "legendFormat": "{{status}}",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short"
+          },
+          "overrides": []
+        },
+        "options": {}
+      },
+      {
+        "id": 13,
+        "type": "timeseries",
+        "title": "Upstream requests by outcome, 15 min",
+        "description": "Every TfNSW request, realtime and schedule. quota or unauthorized means act now.",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
+        "gridPos": {
+          "x": 0,
+          "y": 28,
+          "w": 12,
+          "h": 8
+        },
+        "targets": [
+          {
+            "datasource": {
+              "type": "prometheus",
+              "uid": "${datasource}"
+            },
+            "expr": "sum by (outcome) (increase(transitlateagain_feed_requests_total[15m]))",
+            "legendFormat": "{{outcome}}",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short"
+          },
+          "overrides": []
+        },
+        "options": {}
+      },
+      {
+        "id": 14,
+        "type": "timeseries",
+        "title": "Feed age",
+        "description": "Fetch time minus the feed's own header timestamp at the last successful poll.",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
+        "gridPos": {
+          "x": 12,
+          "y": 28,
+          "w": 12,
+          "h": 8
+        },
+        "targets": [
+          {
+            "datasource": {
+              "type": "prometheus",
+              "uid": "${datasource}"
+            },
+            "expr": "transitlateagain_feed_age_seconds",
+            "legendFormat": "{{feed_id}}",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "s"
+          },
+          "overrides": []
+        },
+        "options": {}
+      },
+      {
+        "id": 15,
+        "type": "timeseries",
+        "title": "Rollup lag",
+        "description": "Now minus the rollup watermark. Hours roll up 3 h after they end, so 3\u20134 h is normal.",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
+        "gridPos": {
+          "x": 0,
+          "y": 36,
+          "w": 12,
+          "h": 8
+        },
+        "targets": [
+          {
+            "datasource": {
+              "type": "prometheus",
+              "uid": "${datasource}"
+            },
+            "expr": "transitlateagain_rollup_lag_seconds",
+            "legendFormat": "",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "s"
+          },
+          "overrides": []
+        },
+        "options": {}
+      },
+      {
+        "id": 16,
+        "type": "stat",
+        "title": "Any feed stale",
+        "description": "1 when a feed's header timestamp has not advanced for FEED_STALE_POLLS polls.",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
+        "gridPos": {
+          "x": 12,
+          "y": 36,
+          "w": 12,
+          "h": 8
+        },
+        "targets": [
+          {
+            "datasource": {
+              "type": "prometheus",
+              "uid": "${datasource}"
+            },
+            "expr": "max(transitlateagain_feed_stale)",
+            "legendFormat": "",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {
+                  "color": "green",
+                  "value": null
+                },
+                {
+                  "color": "red",
+                  "value": 1
+                }
+              ]
+            }
+          },
+          "overrides": []
+        },
+        "options": {
+          "reduceOptions": {
+            "calcs": [
+              "lastNotNull"
+            ],
+            "fields": "",
+            "values": false
+          },
+          "colorMode": "value",
+          "graphMode": "area",
+          "textMode": "value"
+        }
       }
-    ]
-  },
-  "annotations": {
-    "list": []
-  },
-  "description": "Generated from the \u00a710.3 metrics. Source: deploy/grafana-dashboard.json."
+    ],
+    "templating": {
+      "list": [
+        {
+          "name": "datasource",
+          "label": "Data source",
+          "type": "datasource",
+          "query": "prometheus",
+          "current": {},
+          "hide": 0,
+          "refresh": 1,
+          "options": []
+        }
+      ]
+    },
+    "annotations": {
+      "list": []
+    },
+    "description": "Generated from the \u00a710.3 metrics. Source: deploy/grafana-dashboard.json."
+  }
 }
