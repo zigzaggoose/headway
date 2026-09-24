@@ -90,6 +90,10 @@ HTTP_RATE_LIMIT_RPS=10
 EOF
 ```
 
+Grafana Cloud's remote-write details are appended the same way (step 6). The
+token needs the **metrics:write** scope: one generated from the Prometheus
+page's read side answers remote write with `401 invalid scope requested`.
+
 `DATABASE_URL` is deliberately absent: Compose builds it from
 `POSTGRES_PASSWORD`. Everything else takes the §8 defaults.
 `HTTP_RATE_LIMIT_RPS=10` was added after the first deploy: a history query
@@ -98,21 +102,69 @@ saturate it, and a person needs one or two a second.
 
 ## 5. Start
 
+Every Compose command on the VM layers `deploy/docker-compose.vm.yml`, which
+adds port 443, the origin certificate, the client-IP header and Alloy:
+
 ```sh
 cd /opt/transitlateagain
-docker compose --env-file .env -f deploy/docker-compose.yml up -d --build
+docker compose --env-file .env -f deploy/docker-compose.yml -f deploy/docker-compose.vm.yml up -d --build
 ```
 
-## 6. Per-IP connection limits
+## 6. Cloudflare, TLS and Grafana (2026-09-24)
 
-`deploy/firewall.sh` puts a connection cap and a new-connection rate on port
-8080 in Docker's `DOCKER-USER` chain (the script says why ufw cannot), run at
-every boot after Docker:
+`transitlateagain.dev` is registered at Namecheap with its nameservers set to
+Cloudflare (free plan). Cloudflare proxies it to the VM in **Full (strict)**
+mode.
+
+**DNS.** One proxied `A` record, `@` → `119.42.55.16`. Adding the site to
+Cloudflare imported Namecheap's parking records — an `A` to `192.64.119.71`
+and a `www` CNAME to `parkingpage.namecheap.com` — and the first symptom was a
+522 with no connection ever reaching the VM. The `A` was corrected and `www`
+deleted. The MX and TXT records are Namecheap email forwarding, left alone.
+
+**Origin certificate.** The key is generated on the VM, so it never leaves it;
+the CSR goes to Cloudflare (SSL/TLS → Origin Server → "Use my private key and
+CSR", 15 years), and the certificate it returns is public:
+
+```sh
+install -d -m 0755 /opt/transitlateagain-tls && cd /opt/transitlateagain-tls
+openssl ecparam -genkey -name prime256v1 -noout -out origin.key
+openssl req -new -key origin.key -out origin.csr -subj "/CN=transitlateagain.dev" \
+  -addext "subjectAltName=DNS:transitlateagain.dev,DNS:*.transitlateagain.dev"
+chown 65532:65532 origin.key && chmod 0400 origin.key   # the image's nonroot user
+cat origin.csr                                             # paste into Cloudflare
+cat > origin.pem                                           # paste the certificate, Ctrl-D
+chmod 0444 origin.pem
+[ "$(openssl x509 -in origin.pem -noout -pubkey)" = "$(openssl pkey -in origin.key -pubout)" ] && echo match
+```
+
+It expires on 2041-09-20.
+
+**Grafana Cloud.** Alloy (in `docker-compose.vm.yml`) needs three lines in
+`.env`:
+
+```sh
+cat >> /opt/transitlateagain/.env   # then paste, Ctrl-D
+GRAFANA_REMOTE_WRITE_URL=https://prometheus-prod-41-prod-au-southeast-1.grafana.net/api/prom/push
+GRAFANA_USERNAME=3608752
+GRAFANA_TOKEN=glc_...
+```
+
+Alloy's own counters are the delivery check; its image has no curl:
+
+```sh
+docker exec transitlateagain-alloy-1 bash -c 'exec 3<>/dev/tcp/127.0.0.1/12345;
+  printf "GET /metrics HTTP/1.0\r\n\r\n" >&3; cat <&3' | grep -E '^prometheus_remote_storage_samples_(total|failed_total)'
+```
+
+**Only Cloudflare reaches the API port.** `deploy/firewall.sh` allowlists
+Cloudflare's IPv4 ranges on the container port in Docker's `DOCKER-USER`
+chain (the script says why ufw cannot), run at every boot after Docker:
 
 ```sh
 cat > /etc/systemd/system/transitlateagain-firewall.service <<'UNIT'
 [Unit]
-Description=Transit Late Again per-IP limits on the API port
+Description=Transit Late Again: only Cloudflare may reach the API port
 Requires=docker.service
 After=docker.service
 
@@ -125,13 +177,23 @@ ExecStart=/bin/sh /opt/transitlateagain/deploy/firewall.sh
 WantedBy=multi-user.target
 UNIT
 systemctl daemon-reload && systemctl enable --now transitlateagain-firewall
-iptables -L TRANSITLATEAGAIN-LIMIT -v -n
+iptables -L TRANSITLATEAGAIN-CF -v -n
 ```
 
-Measured from a laptop on 2026-09-24: of 120 new connections opened 60 at a
-time, the `DROP` rule took 33, and the next request went straight through. 25
-concurrent `/v1/lines` requests gave 10 × 200, 10 × 429 from the application
-limit and 5 dropped.
+It replaced a first version that capped connections per source IP, which
+behind Cloudflare would have throttled Cloudflare's own addresses:
+
+```sh
+iptables -D DOCKER-USER -i eth0 -p tcp --dport 8080 -j TRANSITLATEAGAIN-LIMIT
+iptables -F TRANSITLATEAGAIN-LIMIT && iptables -X TRANSITLATEAGAIN-LIMIT
+```
+
+Checked on 2026-09-24: `https://transitlateagain.dev/readyz` 200 through
+Cloudflare's SYD edge; `https://119.42.55.16` and `http://119.42.55.16:8080`
+time out from outside; the access log shows Cloudflare as `remote` and the
+real client as `client_ip`; 25 concurrent requests from one client through
+Cloudflare gave 11 × 200 and 14 × 429. Memory: service 230 MB, Postgres 142
+MB, Alloy 79 MB, 232 MB available.
 
 ## 7. The rename (2026-09-24, from `headway`)
 
@@ -159,7 +221,7 @@ Checked afterwards: 143,231 observations with the earliest still at 11:53
 
 ```sh
 cd /opt/transitlateagain && git pull
-docker compose --env-file .env -f deploy/docker-compose.yml up -d --build
+docker compose --env-file .env -f deploy/docker-compose.yml -f deploy/docker-compose.vm.yml up -d --build
 ```
 
 Compose's `stop_grace_period: 45s` lets the old container flush its final batch

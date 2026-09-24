@@ -21,10 +21,11 @@ hourly and served. Buses are left off: they would not fit the 1 GB VM
 
 **Live since 2026-09-24** on a BinaryLane VM in Sydney
 (`deploy/vm-bootstrap.md`):
-[`/v1/lines/IWL_1a/now`](http://119.42.55.16:8080/v1/lines/IWL_1a/now) is
-what the T2 is doing right now.
+[`transitlateagain.dev/v1/lines/IWL_1a/now`](https://transitlateagain.dev/v1/lines/IWL_1a/now)
+is what the T2 is doing right now. Cloudflare sits in front; metrics go to
+Grafana Cloud.
 
-![The live /v1/lines/IWL_1a/now response for the T2 at 12:21 on 2026-09-24](docs/img/now.png)
+![The live /v1/lines/IWL_1a/now response for the T2 at 14:21 on 2026-09-24](docs/img/now.png)
 
 ## How it works
 
@@ -90,8 +91,8 @@ curl "localhost:8080/v1/lines/APS_1a/history?from=2026-09-20&bucket=day"
 curl localhost:8080/readyz
 ```
 
-Swap `localhost:8080` for `119.42.55.16:8080` to ask the live service. It
-allows 10 requests a second per client. `/v1/admin/stats` is not on the
+Swap `localhost:8080` for `https://transitlateagain.dev` to ask the live
+service. It allows 10 requests a second per client. `/v1/admin/stats` is not on the
 public port; it listens on `ADMIN_ADDR`, which the VM keeps on loopback.
 
 Route and stop ids are TfNSW's own (`APS_1a` is one T8 pattern; `2020102` is

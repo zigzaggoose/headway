@@ -21,7 +21,7 @@ terminator line (`EOF`) ends early — pick a terminator the body cannot contain
 
 | Stage | State |
 |---|---|
-| 1 — MVP | **Complete.** Live at `http://119.42.55.16:8080` since 2026-09-24 11:53. |
+| 1 — MVP | **Complete.** Live at `https://transitlateagain.dev` since 2026-09-24 11:53. |
 | 2 — Matching, history, CI | **Complete.** |
 | 3 — All modes, scale, load test | Complete except **storage over a full day** (below). |
 | 4 — Observability, front end | Not started. Decisions waiting on the user (below). |
@@ -50,33 +50,29 @@ run is in `deploy/vm-bootstrap.md`; update with `git pull` and `docker compose
    day is the `observations_2026_09_25` partition. It is complete early on
    2026-09-26 and its last hour rolls up about 3 h later, so measure on the
    afternoon of **2026-09-26** with the SQL at the end of `docs/storage.md`
-   (run it through `docker compose exec postgres psql -U headway`). Fill in
+   (run it through `docker compose --env-file .env -f deploy/docker-compose.yml -f deploy/docker-compose.vm.yml exec postgres psql -U headway`). Fill in
    `docs/storage.md` and the two "baseline TBD" rows of §13.
 2. **Parramatta light rail** (`lightrail-parramatta`) has published an empty
    feed all day on 2026-09-24 — a 15-byte header, no entities (one raw fetch).
    Polls succeed, so nothing is wrong on our side. If it is still empty after a
    few days, record it in §9.1.
 
-## Stage 4: decided, in progress
+## Stage 4
 
-1. **`/metrics` is live** (`117e553`) on the admin port only: every §10.3
-   metric, 22 families visible on the first scrape (the other five appear on
-   their first event). Read it with
-   `ssh root@119.42.55.16 curl -s localhost:8081/metrics`. Memory unchanged
-   (236 MB service). The first scrape exposed the schedule 502 bug below.
-2. **Grafana Cloud:** the user is creating the account. Plan: Grafana Alloy on
-   the VM pushing out, so `/metrics` stays private. Measure Alloy's memory
-   first (~220 MB free). The Grafana token is a secret: it goes into a file on
-   the VM, never into the chat.
-3. **Domain bought: `transitlateagain.dev`.** `.dev` is HTTPS-only in every
-   browser (HSTS preload), so it shows nothing until TLS works. Plan:
-   Cloudflare free plan in front (TLS plus flood protection). The origin side
-   still to do: publish on a port Cloudflare proxies, lock 8080/80 to
-   Cloudflare's ranges in `DOCKER-USER`, and key the rate limiter on
-   `CF-Connecting-IP`, trusted only from Cloudflare addresses.
-4. **Renamed** from Headway to Transit Late Again (`b7b1059`); GitHub repo is
-   `zigzaggoose/transitlateagain`. Postgres role/database and the volume
-   (`headway_pgdata`) keep the old name on purpose (§15).
+- **Done:** `/metrics` (admin port only) and Grafana Cloud via Alloy on the
+  VM; `https://transitlateagain.dev` through Cloudflare in Full (strict), with
+  only Cloudflare's ranges admitted to the API port. `vm-bootstrap.md` §6 has
+  every step.
+- **Next:** one dashboard (ingest rate, freshness p95, match rate, queue
+  length, partitions, API p95), then the `IngestStopped` alert with a
+  `docs/runbook.md` entry, then `web/`. The dashboard and alert are built in
+  the Grafana UI by the user; the queries are §10.3/§10.4.
+- **Every VM Compose command needs both files:**
+  `docker compose --env-file .env -f deploy/docker-compose.yml -f deploy/docker-compose.vm.yml ...`
+- **Secrets pasted into this session's transcript:** a read-only Grafana token
+  (delete it in Grafana → Access Policies) and the Alloy write token now in
+  use (rotate if the transcript is shared). The origin key never left the VM.
+- `/v1/admin/stats` and `/metrics`: `ssh root@119.42.55.16 curl -s localhost:8081/...`
 
 ## Found and fixed this session
 

@@ -1534,11 +1534,11 @@ Each stage ends in something that runs and can be demonstrated. **Stage 2 is the
 ### Stage 4 — Observability and front end
 
 - [x] `internal/metrics/metrics.go` with every metric in §10.3. 2026-09-24; a test scrapes the registry for all 27 names. The package is `metrics`, not `obs`: `obs` is this codebase's name for a slice of observations (§15).
-- [ ] `/metrics` endpoint; Grafana Cloud free tier scraping it.
+- [x] `/metrics` endpoint; Grafana Cloud free tier scraping it. 2026-09-24: Alloy on the VM pushes rather than Grafana scraping, so `/metrics` stays private (§15); 3,755 samples sent in the first minutes, 0 failed.
 - [ ] One dashboard: ingest rate, freshness p95, match rate, queue length, partition count, API p95.
 - [ ] One alert wired end to end — `TransitLateAgainIngestStopped` — with a `docs/runbook.md` entry.
 - [ ] `web/`: Next.js, one page, a line selector and a stop history chart hitting the live API.
-- [ ] Optional: custom domain and TLS via Caddy in Compose.
+- [x] Optional: custom domain and TLS via Caddy in Compose. 2026-09-24: `https://transitlateagain.dev`, TLS by Cloudflare (Full (strict), origin certificate on the VM) rather than Caddy, and only Cloudflare can reach the port (§15).
 - **Demo:** "here is the dashboard, and here is what happens when I stop the container."
 
 ---
