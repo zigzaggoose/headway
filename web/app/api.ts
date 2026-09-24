@@ -47,6 +47,11 @@ export type Now = {
 export type Bucket = {
   bucket_start: string;
   n_obs: number;
+  n_early: number;
+  n_on_time: number;
+  n_late: number;
+  n_very_late: number;
+  n_cancelled: number;
   on_time_pct: number | null;
   delay_p50_s: number | null;
 };

@@ -1,25 +1,29 @@
-import type { Bucket } from "./api";
+import type { Tally } from "./lines";
 
-// When is how a bucket's start reads in Sydney: an hour or a day.
-export function when(iso: string, bucket: "hour" | "day"): string {
-  return new Intl.DateTimeFormat("en-AU", {
-    timeZone: "Australia/Sydney",
-    weekday: "short",
-    day: "numeric",
-    month: "short",
-    ...(bucket === "hour" ? { hour: "numeric" } : {}),
-  }).format(new Date(iso));
+// Late folds in very late: five warm-to-red slices could not be told apart
+// under colour blindness, and the legend still gives the very-late count.
+// This order keeps every neighbouring pair, and the wrap from cancelled back
+// to on time, distinguishable (validated in light and dark).
+const SLICES = [
+  { cls: "on-time", label: "On time", n: (t: Tally) => t.on_time },
+  { cls: "early", label: "Early", n: (t: Tally) => t.early },
+  { cls: "late", label: "Late", n: (t: Tally) => t.late + t.very_late },
+  { cls: "cancelled", label: "Cancelled", n: (t: Tally) => t.cancelled },
+];
+
+const R = 80;
+
+// arc is one slice from fraction a to b of the circle, clockwise from 12 o'clock.
+function arc(a: number, b: number): string {
+  const at = (f: number) => `${R * Math.sin(2 * Math.PI * f)} ${-R * Math.cos(2 * Math.PI * f)}`;
+  return `M 0 0 L ${at(a)} A ${R} ${R} 0 ${b - a > 0.5 ? 1 : 0} 1 ${at(b)} Z`;
 }
 
-const W = 720;
-const H = 200;
-const LEFT = 40; // room for the percentage labels, so no bar covers them
-
-// OnTimeChart draws on-time percentage per bucket as bars. Hand-drawn SVG: a
-// bar per bucket and a 0–100 scale is not worth a charting library.
-export function OnTimeChart({ buckets, bucket }: { buckets: Bucket[]; bucket: "hour" | "day" }) {
-  const shown = buckets.filter((b) => b.on_time_pct !== null);
-  if (shown.length === 0) {
+// StatusPie shows where the stop visits in the range ended up. Hand-drawn SVG:
+// four arcs are not worth a charting library.
+export function StatusPie({ tally }: { tally: Tally }) {
+  const total = SLICES.reduce((s, x) => s + x.n(tally), 0);
+  if (total === 0) {
     return (
       <p className="muted">
         No history in this range yet. Each hour is rolled up three hours after it ends, so history runs
@@ -27,47 +31,37 @@ export function OnTimeChart({ buckets, bucket }: { buckets: Bucket[]; bucket: "h
       </p>
     );
   }
-  const step = (W - LEFT) / shown.length;
-  const gap = Math.min(4, step * 0.2);
-  const summary = shown
-    .map((b) => `${when(b.bucket_start, bucket)}: ${b.on_time_pct}% on time`)
-    .join("; ");
-
+  const pct = (n: number) => `${Math.round((1000 * n) / total) / 10}%`;
+  let from = 0;
   return (
-    <svg viewBox={`0 -10 ${W} ${H + 30}`} className="chart" role="img" aria-label={summary}>
-      {[0, 50, 100].map((pct) => (
-        <g key={pct}>
-          <line x1={LEFT} x2={W} y1={H - (pct / 100) * H} y2={H - (pct / 100) * H} className="grid" />
-          <text x={LEFT - 6} y={H - (pct / 100) * H + 4} className="axis" textAnchor="end">
-            {pct}%
-          </text>
-        </g>
-      ))}
-      {shown.map((b, i) => {
-        const pct = b.on_time_pct ?? 0;
-        const h = (pct / 100) * H;
-        return (
-          <rect
-            key={b.bucket_start}
-            x={LEFT + i * step + gap / 2}
-            y={H - h}
-            width={Math.max(1, step - gap)}
-            height={h}
-            className={pct >= 90 ? "bar good" : pct >= 75 ? "bar fair" : "bar poor"}
-          >
-            <title>
-              {`${when(b.bucket_start, bucket)}: ${pct}% on time of ${b.n_obs} stop visits` +
-                (b.delay_p50_s !== null ? `, median delay ${b.delay_p50_s} s` : "")}
-            </title>
-          </rect>
-        );
-      })}
-      <text x={LEFT} y={H + 16} className="axis">
-        {when(shown[0].bucket_start, bucket)}
-      </text>
-      <text x={W} y={H + 16} className="axis" textAnchor="end">
-        {when(shown[shown.length - 1].bucket_start, bucket)}
-      </text>
-    </svg>
+    <div className="pie">
+      <svg viewBox={`${-R - 2} ${-R - 2} ${2 * R + 4} ${2 * R + 4}`} aria-hidden="true">
+        {SLICES.map((s) => {
+          const n = s.n(tally);
+          if (n === 0) return null;
+          const a = from;
+          from += n / total;
+          return n === total ? (
+            <circle key={s.cls} r={R} className={s.cls} />
+          ) : (
+            <path key={s.cls} d={arc(a, from)} className={s.cls}>
+              <title>{`${s.label}: ${n} (${pct(n)})`}</title>
+            </path>
+          );
+        })}
+      </svg>
+      <ul>
+        {SLICES.map((s) => (
+          <li key={s.cls}>
+            <span className={`swatch ${s.cls}`} />
+            {s.label} <b>{pct(s.n(tally))}</b>{" "}
+            <span className="muted">
+              {s.n(tally)}
+              {s.cls === "late" && tally.very_late > 0 && `, ${tally.very_late} over 15 min`}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }
