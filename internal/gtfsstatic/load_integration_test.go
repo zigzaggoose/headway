@@ -433,7 +433,7 @@ func TestRun_LoadsAtStartupAndStopsOnCancel(t *testing.T) {
 func TestSchedule_ReadBack_RoundTripsTheActiveVersion(t *testing.T) {
 	h := newHarness(t, 3)
 	b := bundle(t, map[string]string{
-		"routes.txt":         "route_id,route_type\nAPS_1a,2\n",
+		"routes.txt":         "route_id,route_type\nAPS_1a,2\nAPS_1d,2\n",
 		"stops.txt":          "stop_id,stop_name\nA,Alpha\nB,Beta\n",
 		"trips.txt":          "route_id,service_id,trip_id,direction_id,trip_headsign\nAPS_1a,SVC,T-1,1,Macarthur\n",
 		"stop_times.txt":     "trip_id,arrival_time,departure_time,stop_id,stop_sequence\nT-1,25:10:00,25:11:00,B,20\nT-1,,,A,3\n",
@@ -462,6 +462,9 @@ func TestSchedule_ReadBack_RoundTripsTheActiveVersion(t *testing.T) {
 	}
 	if r, ok := s.Route("APS_1a"); !ok || r.Type != 2 {
 		t.Errorf("route = %+v, found %v", r, ok)
+	}
+	if _, ok := s.Route("APS_1d"); ok {
+		t.Error("APS_1d has no trips and was loaded; /v1/lines would list a route that can never have data")
 	}
 	if name, ok := s.Stop("B"); !ok || name != "Beta" {
 		t.Errorf("stop B = %q, found %v", name, ok)

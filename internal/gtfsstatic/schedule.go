@@ -32,7 +32,11 @@ func (l *Loader) Schedule(ctx context.Context, feedID string) (*match.Schedule, 
 		}
 		sched = match.NewSchedule(version, feedID)
 
-		if err := each(ctx, tx, `SELECT route_id, coalesce(short_name, ''), coalesce(long_name, ''), route_type FROM routes WHERE version_id = $1`,
+		// A route with no trips can never be matched or have data: TfNSW's
+		// bundle carries 34 of 152 such train routes, and /v1/lines listing
+		// them was clutter a rider could only pick to see nothing (§15).
+		if err := each(ctx, tx, `SELECT route_id, coalesce(short_name, ''), coalesce(long_name, ''), route_type FROM routes r
+			WHERE version_id = $1 AND EXISTS (SELECT 1 FROM trips t WHERE t.version_id = r.version_id AND t.route_id = r.route_id)`,
 			version, func(r pgx.Rows) error {
 				var id string
 				var rt match.Route
