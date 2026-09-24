@@ -77,4 +77,4 @@ jobs:
       # The single most likely deployment failure: the VM is x86-64 and the
       # laptops are arm64.
       - name: Cross-compile for the VM
-        run: GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o /dev/null ./cmd/headway
+        run: GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o /dev/null ./cmd/transitlateagain

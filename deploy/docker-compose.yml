@@ -1,9 +1,9 @@
-# Production and local: postgres + headway. Run from the repository root with
+# Production and local: postgres + transitlateagain. Run from the repository root with
 #   docker compose --env-file .env -f deploy/docker-compose.yml up -d
 # (make up adds the local override). On the VM the repository is cloned to
-# /opt/headway, so ../.env below is /opt/headway/.env (§8.2).
+# /opt/transitlateagain, so ../.env below is /opt/transitlateagain/.env (§8.2).
 
-name: headway
+name: transitlateagain
 
 x-logging: &logging
   # The VM has a 20 GB disk. Unrotated container logs are the easiest way to
@@ -35,11 +35,11 @@ services:
     restart: unless-stopped
     logging: *logging
 
-  headway:
+  transitlateagain:
     build:
       context: ..
       dockerfile: deploy/Dockerfile
-    image: headway:local
+    image: transitlateagain:local
     env_file: ../.env
     environment:
       # Overrides the laptop's localhost URL from .env: inside Compose the
@@ -67,3 +67,7 @@ services:
 
 volumes:
   pgdata:
+    # The project was called headway until 2026-09-24, and Compose names
+    # volumes after the project. Pinning the name keeps the VM's data across
+    # the rename; without it, the renamed project would start on an empty one.
+    name: headway_pgdata

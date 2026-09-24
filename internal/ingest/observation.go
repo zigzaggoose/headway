@@ -5,7 +5,7 @@ package ingest
 
 import "time"
 
-// Observation is Headway's unit of stored data: one delay measurement for one
+// Observation is Transit Late Again's unit of stored data: one delay measurement for one
 // stop of one trip at one feed timestamp.
 //
 // A nil pointer means the producer did not supply the value, which is not the

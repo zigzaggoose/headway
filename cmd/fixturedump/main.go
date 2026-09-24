@@ -20,9 +20,9 @@ import (
 	"github.com/MobilityData/gtfs-realtime-bindings/golang/gtfs"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/zigzaggoose/headway/internal/config"
-	"github.com/zigzaggoose/headway/internal/feed"
-	"github.com/zigzaggoose/headway/internal/gtfsrt"
+	"github.com/zigzaggoose/transitlateagain/internal/config"
+	"github.com/zigzaggoose/transitlateagain/internal/feed"
+	"github.com/zigzaggoose/transitlateagain/internal/gtfsrt"
 )
 
 func main() {
@@ -72,7 +72,7 @@ func capture(args []string) error {
 		}
 	}
 	if target.ID == "" {
-		return fmt.Errorf("feed %q is not in the resolved catalogue; check HEADWAY_ENABLED_FEEDS", *feedID)
+		return fmt.Errorf("feed %q is not in the resolved catalogue; check ENABLED_FEEDS", *feedID)
 	}
 
 	client := feed.NewClient(cfg.APIKey, cfg.Poll.HTTPTimeout, time.Now)

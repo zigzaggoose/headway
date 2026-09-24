@@ -1,6 +1,6 @@
 #!/bin/sh
 # Per-source-IP limits on the public API port, run at boot by
-# headway-firewall.service (deploy/vm-bootstrap.md). Idempotent.
+# transitlateagain-firewall.service (deploy/vm-bootstrap.md). Idempotent.
 #
 # ufw cannot do this: Docker DNATs published ports in its own chains before
 # ufw's rules see the packet. DOCKER-USER is the chain Docker reserves for
@@ -15,14 +15,14 @@
 # goroutine.
 set -eu
 
-iptables -N HEADWAY-LIMIT 2>/dev/null || iptables -F HEADWAY-LIMIT
+iptables -N TRANSITLATEAGAIN-LIMIT 2>/dev/null || iptables -F TRANSITLATEAGAIN-LIMIT
 # Too many open at once: reset, so a real client fails fast instead of hanging.
-iptables -A HEADWAY-LIMIT -p tcp --syn -m connlimit --connlimit-above 20 --connlimit-mask 32 \
+iptables -A TRANSITLATEAGAIN-LIMIT -p tcp --syn -m connlimit --connlimit-above 20 --connlimit-mask 32 \
   -j REJECT --reject-with tcp-reset
 # Too many new per second: drop, which costs a flooder a retransmit timeout.
-iptables -A HEADWAY-LIMIT -p tcp --syn -m hashlimit --hashlimit-name headway \
+iptables -A TRANSITLATEAGAIN-LIMIT -p tcp --syn -m hashlimit --hashlimit-name api8080 \
   --hashlimit-mode srcip --hashlimit-above 20/second --hashlimit-burst 40 -j DROP
-iptables -A HEADWAY-LIMIT -j RETURN
+iptables -A TRANSITLATEAGAIN-LIMIT -j RETURN
 
-iptables -C DOCKER-USER -i eth0 -p tcp --dport 8080 -j HEADWAY-LIMIT 2>/dev/null ||
-  iptables -I DOCKER-USER -i eth0 -p tcp --dport 8080 -j HEADWAY-LIMIT
+iptables -C DOCKER-USER -i eth0 -p tcp --dport 8080 -j TRANSITLATEAGAIN-LIMIT 2>/dev/null ||
+  iptables -I DOCKER-USER -i eth0 -p tcp --dport 8080 -j TRANSITLATEAGAIN-LIMIT

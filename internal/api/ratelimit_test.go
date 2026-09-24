@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zigzaggoose/headway/internal/cache"
-	"github.com/zigzaggoose/headway/internal/match"
+	"github.com/zigzaggoose/transitlateagain/internal/cache"
+	"github.com/zigzaggoose/transitlateagain/internal/match"
 )
 
 type clock struct{ t time.Time }

@@ -1,5 +1,5 @@
 // Package gtfsrt turns a feed body into flattened updates. Every
-// field-presence check in Headway lives here: the generated protobuf structs
+// field-presence check in Transit Late Again lives here: the generated protobuf structs
 // are full of pointers, and no other package is allowed to call GetX() on one.
 // It knows nothing about the timetable, the database, or what "late" means.
 // PROJECT.md §4.2 (3).
@@ -68,13 +68,13 @@ type RawUpdate struct {
 }
 
 // DropReason labels an update the decoder refused. The reasons are metric
-// labels (§10.3 headway_updates_dropped_total{reason}), so they are a small
+// labels (§10.3 transitlateagain_updates_dropped_total{reason}), so they are a small
 // closed set of lowercase identifiers.
 type DropReason string
 
 const (
 	// DropNotTripUpdate is an entity carrying a vehicle position or an alert.
-	// Headway ingests trip updates only (§2), so these are expected, not bad.
+	// Transit Late Again ingests trip updates only (§2), so these are expected, not bad.
 	DropNotTripUpdate DropReason = "not_trip_update"
 
 	// DropNoTripID is a trip update with no trip_id. The observation key is

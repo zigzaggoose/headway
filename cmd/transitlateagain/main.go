@@ -1,4 +1,4 @@
-// Command headway polls TfNSW GTFS-realtime feeds, matches each stop-time
+// Command transitlateagain polls TfNSW GTFS-realtime feeds, matches each stop-time
 // update against the published timetable, and serves the resulting delay
 // observations over HTTP. See PROJECT.md for the design.
 package main
@@ -25,17 +25,17 @@ import (
 	// corrupts every service date. PROJECT.md §9.2.
 	_ "time/tzdata"
 
-	"github.com/zigzaggoose/headway"
-	"github.com/zigzaggoose/headway/internal/api"
-	"github.com/zigzaggoose/headway/internal/cache"
-	"github.com/zigzaggoose/headway/internal/config"
-	"github.com/zigzaggoose/headway/internal/feed"
-	"github.com/zigzaggoose/headway/internal/gtfsrt"
-	"github.com/zigzaggoose/headway/internal/gtfsstatic"
-	"github.com/zigzaggoose/headway/internal/ingest"
-	"github.com/zigzaggoose/headway/internal/match"
-	"github.com/zigzaggoose/headway/internal/rollup"
-	"github.com/zigzaggoose/headway/internal/store"
+	"github.com/zigzaggoose/transitlateagain"
+	"github.com/zigzaggoose/transitlateagain/internal/api"
+	"github.com/zigzaggoose/transitlateagain/internal/cache"
+	"github.com/zigzaggoose/transitlateagain/internal/config"
+	"github.com/zigzaggoose/transitlateagain/internal/feed"
+	"github.com/zigzaggoose/transitlateagain/internal/gtfsrt"
+	"github.com/zigzaggoose/transitlateagain/internal/gtfsstatic"
+	"github.com/zigzaggoose/transitlateagain/internal/ingest"
+	"github.com/zigzaggoose/transitlateagain/internal/match"
+	"github.com/zigzaggoose/transitlateagain/internal/rollup"
+	"github.com/zigzaggoose/transitlateagain/internal/store"
 )
 
 func main() {
@@ -43,7 +43,7 @@ func main() {
 	// so `make migrate` and a starting container take the same code path.
 	migrateOnly := flag.Bool("migrate-only", false, "apply database migrations and exit")
 	// One maintenance tick — partitions, rollup, retention — then exit. For
-	// the disk-full runbook (§10.3): RETENTION_DAYS=3 headway -maintain-once.
+	// the disk-full runbook (§10.3): RETENTION_DAYS=3 transitlateagain -maintain-once.
 	// A flag rather than cmd/maintain for the reason -migrate-only is one: the
 	// distroless image carries exactly one binary.
 	maintainOnce := flag.Bool("maintain-once", false, "run one maintenance tick and exit")
@@ -75,7 +75,7 @@ func main() {
 		os.Exit(2)
 	}
 
-	migrations, err := fs.Sub(headway.Migrations, "migrations")
+	migrations, err := fs.Sub(transitlateagain.Migrations, "migrations")
 	if err != nil {
 		log.Error("cannot start", "component", "main", "err", err.Error())
 		os.Exit(2)

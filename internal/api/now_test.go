@@ -6,10 +6,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zigzaggoose/headway/internal/cache"
-	"github.com/zigzaggoose/headway/internal/ingest"
-	"github.com/zigzaggoose/headway/internal/match"
-	"github.com/zigzaggoose/headway/internal/store"
+	"github.com/zigzaggoose/transitlateagain/internal/cache"
+	"github.com/zigzaggoose/transitlateagain/internal/ingest"
+	"github.com/zigzaggoose/transitlateagain/internal/match"
+	"github.com/zigzaggoose/transitlateagain/internal/store"
 )
 
 // matched is a timetable-matched observation at a known stop_sequence.

@@ -1,4 +1,4 @@
-# Headway
+# Transit Late Again
 
 Single source of truth for this repository. Claude re-reads this file at the start of every session and has no other memory of the project. Everything needed to write code here is in this file or reachable from it.
 
@@ -8,20 +8,20 @@ Last revised: 2026-09-21.
 
 ## 1. Project
 
-Headway is a Go service that polls Transport for NSW GTFS-realtime feeds on a fixed interval, decodes the protobuf payloads, matches each realtime stop-time update against the published static timetable, and stores the resulting delay observations in PostgreSQL. It serves two kinds of question over HTTP: *what is happening on this line right now*, and *how has this stop or line performed over the last N days*. Raw observations are partitioned by service date, rolled up hourly, and dropped on a retention schedule so the whole thing fits on a free-tier Linux VM.
+Transit Late Again is a Go service that polls Transport for NSW GTFS-realtime feeds on a fixed interval, decodes the protobuf payloads, matches each realtime stop-time update against the published static timetable, and stores the resulting delay observations in PostgreSQL. It serves two kinds of question over HTTP: *what is happening on this line right now*, and *how has this stop or line performed over the last N days*. Raw observations are partitioned by service date, rolled up hourly, and dropped on a retention schedule so the whole thing fits on a free-tier Linux VM.
 
-**Problem it solves.** TfNSW publishes realtime data and timetable data, but not on-time performance. Answering "is the T1 usually late at Strathfield on a Tuesday morning" requires you to capture the realtime feed continuously, because it is not archived in a queryable form. Headway captures it and answers the question.
+**Problem it solves.** TfNSW publishes realtime data and timetable data, but not on-time performance. Answering "is the T1 usually late at Strathfield on a Tuesday morning" requires you to capture the realtime feed continuously, because it is not archived in a queryable form. Transit Late Again captures it and answers the question.
 
 **Definition of Done for v1.**
 
 | # | Criterion | How it is verified |
 |---|---|---|
 | 1 | The service runs continuously on the deployment VM for 7 consecutive days without manual intervention. | `process_start_time_seconds` unchanged in `/metrics`; uptime noted in README. |
-| 2 | At least two TfNSW realtime feeds are polled inside the API quota, with zero sustained 403 responses. | `headway_feed_requests_total{outcome="rate_limited"}` flat over 24 h. |
+| 2 | At least two TfNSW realtime feeds are polled inside the API quota, with zero sustained 403 responses. | `transitlateagain_feed_requests_total{outcome="rate_limited"}` flat over 24 h. |
 | 3 | `GET /v1/lines/{route_id}/now` returns in under 100 ms at p95 under a 50 RPS load test. | `k6` or `hey` run recorded in `docs/loadtest.md`. |
 | 4 | `GET /v1/stops/{stop_id}/history` returns 30 days of hourly buckets in under 300 ms at p95. | Same load test. |
-| 5 | Match rate (realtime updates resolved to a scheduled trip) is at or above 90 % on the trains feed. | `headway_match_rate` gauge, and the `/v1/admin/stats` endpoint. |
-| 6 | Freshness lag from feed timestamp to queryable is under 30 s at p95. | `headway_freshness_lag_seconds` histogram. |
+| 5 | Match rate (realtime updates resolved to a scheduled trip) is at or above 90 % on the trains feed. | `transitlateagain_match_rate` gauge, and the `/v1/admin/stats` endpoint. |
+| 6 | Freshness lag from feed timestamp to queryable is under 30 s at p95. | `transitlateagain_freshness_lag_seconds` histogram. |
 | 7 | Raw partitions older than the retention window are dropped automatically and the rollups still answer historical queries. | Partition list shrinks; history endpoint still returns data for dates with no raw partition. |
 | 8 | `docker compose up` on a clean machine brings up Postgres and the service, applies migrations, and serves traffic with no manual SQL. | Followed from a clean clone on the VM. |
 | 9 | CI runs `go vet`, `go test ./...` and a build on every push, including integration tests against a real Postgres. | Green badge on `main`. |
@@ -33,14 +33,14 @@ v1 is done when all ten hold at the same time. Stage 4 items (Grafana, Next.js) 
 
 ## 2. Non-goals
 
-Scope creep is the main risk on this project. Headway does **not** do any of the following, and a request to add one of them is a change to this file first, not a branch.
+Scope creep is the main risk on this project. Transit Late Again does **not** do any of the following, and a request to add one of them is a change to this file first, not a branch.
 
 - **No trip planning, routing or journey search.** No shortest path, no transfers, no fare calculation. TfNSW already has a Trip Planner API for that.
 - **No map rendering, no shape/geometry storage.** `shapes.txt` is skipped at load time. Stop coordinates are stored only so the API can return them; nothing draws a line on a map.
 - **No user accounts, authentication, sessions or multi-tenancy.** The HTTP API is public and read-only. There are no writes over HTTP.
 - **No push notifications, alerting to end users, email, or SMS.**
 - **No service-alerts feed ingestion.** Only trip updates. Vehicle positions are an explicit stretch item and are not ingested in v1 (see §16).
-- **No prediction or forecasting.** Headway reports what the feed said. It does not estimate future delays or build a model.
+- **No prediction or forecasting.** Transit Late Again reports what the feed said. It does not estimate future delays or build a model.
 - **No Kubernetes, no Terraform, no service mesh, no message broker.** One binary, one Postgres, one VM, Docker Compose. Introducing Kafka or NATS here would be resume theatre and is explicitly rejected.
 - **No ORM.** SQL is written by hand in `internal/store`.
 - **No GraphQL.** REST with JSON.
@@ -165,7 +165,7 @@ Versions are pinned. Where a version is stated below it was checked against the 
                   └──────────────────────────────────────────────────────────┘
 ```
 
-Everything above runs in **one process** (`cmd/headway`). The numbers are package boundaries, not deployment units.
+Everything above runs in **one process** (`cmd/transitlateagain`). The numbers are package boundaries, not deployment units.
 
 ### 4.2 Components
 
@@ -251,13 +251,13 @@ Everything above runs in **one process** (`cmd/headway`). The numbers are packag
 ## 5. Repository layout
 
 ```
-headway/
+transitlateagain/
 ├── PROJECT.md                        This file. Source of truth.
 ├── CLAUDE.md                         Persistent instructions for Claude. The subset of this file needed every session.
 ├── HANDOFF.md                        Current session state. Transient; delete when stale.
 ├── README.md                         Short: what it is, how to run it, a screenshot.
 ├── embed.go                          //go:embed migrations/*.sql. No logic; embed cannot reach out of its own directory.
-├── go.mod                            Module github.com/<you>/headway, go 1.27.
+├── go.mod                            Module github.com/<you>/transitlateagain, go 1.27.
 ├── go.sum
 ├── Makefile                          run, test, lint, fixtures, migrate, loadtest targets.
 ├── .gitignore                        Includes .env — never commit it.
@@ -265,7 +265,7 @@ headway/
 ├── .dockerignore
 │
 ├── cmd/
-│   ├── headway/
+│   ├── transitlateagain/
 │   │   └── main.go                   Wires config → components → signal handling. No logic. `-migrate-only` and `-maintain-once` are its one-shot modes.
 │   └── fixturedump/
 │       └── main.go                   Fetch one live feed, write it to testdata/ as .pb. See §11.
@@ -295,7 +295,7 @@ headway/
 │   │   ├── schedule.go               Reads the active version back into a match.Schedule.
 │   │   ├── parse_test.go             Bundles are built in memory; no zip fixture is committed.
 │   │   ├── refresh_test.go
-│   │   └── load_integration_test.go  Tagged; HEADWAY_TEST_BUNDLE runs a downloaded real bundle.
+│   │   └── load_integration_test.go  Tagged; GTFS_TEST_BUNDLE runs a downloaded real bundle.
 │   ├── servicetime/
 │   │   ├── servicetime.go            GTFS "HH:MM:SS" (HH may exceed 23) ↔ seconds; service day maths.
 │   │   └── servicetime_test.go       DST cases are the whole point of this package.
@@ -360,7 +360,7 @@ headway/
 │
 ├── deploy/
 │   ├── Dockerfile                    Multi-stage, CGO_ENABLED=0, cross-compiled to TARGETARCH (amd64 on the VM), distroless.
-│   ├── docker-compose.yml            postgres + headway. Volumes, healthchecks, restart policy.
+│   ├── docker-compose.yml            postgres + transitlateagain. Volumes, healthchecks, restart policy.
 │   ├── docker-compose.override.yml   Local only: port mapping, hot env.
 │   └── vm-bootstrap.md               Exact commands run on a fresh BinaryLane VM. Keep current.
 │
@@ -967,7 +967,7 @@ func NewMatcher(feedIDs []string, o Options) *Matcher
 func (m *Matcher) Swap(s *Schedule)
 func (m *Matcher) Loaded(feedID string) int64
 // Match resolves one poll at a time and returns the counts behind
-// headway_unmatched_total and the match rate. It has no error: every update
+// transitlateagain_unmatched_total and the match rate. It has no error: every update
 // becomes an observation, a counted skip, or several synthesised rows.
 func (m *Matcher) Match(feedID string, updates []gtfsrt.RawUpdate) ([]ingest.Observation, Counts)
 ```
@@ -1025,14 +1025,14 @@ func (s *Store) RollupHour(ctx context.Context, from, to time.Time, t Thresholds
 
 ## 8. Configuration & secrets
 
-All configuration is environment variables, read once at startup into `config.Config`, validated, and never read again. A missing required variable or a failed validation exits with code 2 before any goroutine starts. The one exception is the feed catalogue, which is a JSON file because a list of objects does not fit an env var legibly. [DECIDED — revisit if per-environment feed overrides are needed; the next step would be `HEADWAY_FEEDS_FILE` plus a small overlay, not a config framework.]
+All configuration is environment variables, read once at startup into `config.Config`, validated, and never read again. A missing required variable or a failed validation exits with code 2 before any goroutine starts. The one exception is the feed catalogue, which is a JSON file because a list of objects does not fit an env var legibly. [DECIDED — revisit if per-environment feed overrides are needed; the next step would be `FEEDS_FILE` plus a small overlay, not a config framework.]
 
 | Variable | Type | Default | Required | What breaks if it is wrong |
 |---|---|---|---|---|
 | `TFNSW_API_KEY` | string | — | yes | Every feed request returns 401 and the service never ingests. Validated as non-empty only; a wrong key is indistinguishable from a missing one until the first poll. |
 | `DATABASE_URL` | Postgres URL | — | yes | Startup fails at pool construction. Must include `sslmode=disable` for the Compose-local Postgres and `sslmode=require` if ever pointed at a remote database. |
-| `HEADWAY_FEEDS_FILE` | path | `config/feeds.json` | no | Missing file exits at startup. Malformed JSON exits at startup with the offending line. |
-| `HEADWAY_ENABLED_FEEDS` | comma list of feed ids | every feed with `"enabled": true` | no | When set it replaces the catalogue's `enabled` flags entirely, so a feed can be turned on for one deployment without editing a committed file. Startup logs the resolved list at INFO; an id not in the catalogue is a startup error, not a warning, because a typo would otherwise look like an upstream outage. |
+| `FEEDS_FILE` | path | `config/feeds.json` | no | Missing file exits at startup. Malformed JSON exits at startup with the offending line. |
+| `ENABLED_FEEDS` | comma list of feed ids | every feed with `"enabled": true` | no | When set it replaces the catalogue's `enabled` flags entirely, so a feed can be turned on for one deployment without editing a committed file. Startup logs the resolved list at INFO; an id not in the catalogue is a startup error, not a warning, because a typo would otherwise look like an upstream outage. |
 | `FEED_POLL_INTERVAL` | duration | `15s` | no | Below `10s` wastes quota without gaining freshness (the feeds refresh every 15 s). Below `5s` across several feeds will trip the upstream throttle. Validated: must be ≥ `5s`. |
 | `FEED_POLL_JITTER` | duration | `2s` | no | Zero makes all pollers fire in the same instant, producing a burst that can exceed the 5 requests-per-second throttle. |
 | `FEED_HTTP_TIMEOUT` | duration | `20s` | no | Longer than `FEED_POLL_INTERVAL` lets slow requests pile up; the poller refuses to start a fetch while one is in flight, so a too-long timeout shows up as missed polls. |
@@ -1122,11 +1122,11 @@ Caching behaviour, same date, same key:
 |---|---|---|
 | Local development | `.env` at the repo root, loaded by Compose via `env_file`. | `.env` is in `.gitignore`. `.env.example` carries placeholders only. Never `export` the key in a shell that has history enabled without a leading space. |
 | CI | GitHub Actions repository secret `TFNSW_API_KEY`. | CI never calls the live API — tests run against recorded fixtures. The secret exists only for an optional manually-triggered smoke workflow. |
-| Deployed VM | `/opt/headway/.env`, mode `0600`, owned by the deploy user, referenced by `env_file` in Compose. | Not in the image, not in the Compose file, not in a build arg. |
+| Deployed VM | `/opt/transitlateagain/.env`, mode `0600`, owned by the deploy user, referenced by `env_file` in Compose. | Not in the image, not in the Compose file, not in a build arg. |
 
 - The key is never logged. `config.Secret` is a string type whose `String`, `GoString`, `MarshalText` and `LogValue` all render `[redacted]`, so no print verb and no `slog` attribute can leak it; `Secret.Reveal()` is the single, greppable way to get the real value. `TestConfig_Printed_DoesNotRevealSecrets` asserts that `%v`, `%+v`, `%q` and a JSON log line contain neither the API key nor the database password. `DATABASE_URL` is a `Secret` too, because it carries a password.
 - The key is sent as `Authorization: apikey <KEY>`, never as a query parameter.
-- Rotation: replace the value in `/opt/headway/.env` and `docker compose up -d`. No code change.
+- Rotation: replace the value in `/opt/transitlateagain/.env` and `docker compose up -d`. No code change.
 
 ---
 
@@ -1136,7 +1136,7 @@ Caching behaviour, same date, same key:
 
 **Why it is hard.** The realtime feed refers to trips by `trip_id`, but the static bundle those ids come from is regenerated daily, and ids are not guaranteed stable across regenerations. A trip can be `ADDED` and have no schedule row at all. A trip can be `CANCELED`, in which case the stop-time updates may be absent, empty, or present with `NO_DATA`. `stop_sequence` may be missing, in which case the only anchor is `stop_id`, which is not unique within a trip if the trip visits a stop twice. And TfNSW's feeds are known to emit at least one `TripDescriptor.schedule_relationship` value that the current GTFS-realtime specification no longer defines — historically `REPLACEMENT` — so any code that switches exhaustively on a generated enum will either fail to compile against it or silently mis-bucket it. **Confirm the actual integer value against a captured fixture; do not take a value from this document or from the upstream `.proto` on trust.**
 
-There is a second, related trap: the generated bindings in `github.com/MobilityData/gtfs-realtime-bindings` are built from the canonical `.proto`. TfNSW documents its own `.proto` files carrying TfNSW-assigned extensions (extension field numbers are mentioned in their release notes for the Sydney Trains/Metro v2 and light-rail feeds) for fields such as carriage-level occupancy. Protobuf ignores unknown fields on decode, so **the canonical bindings will decode the core trip-update fields correctly**; they simply will not surface the extensions. Headway does not use the extensions, so the canonical bindings are sufficient. If an extension field is ever needed, generate bindings from TfNSW's published `.proto` into `internal/gtfsrt/pb/` and vendor them — do not patch the upstream module.
+There is a second, related trap: the generated bindings in `github.com/MobilityData/gtfs-realtime-bindings` are built from the canonical `.proto`. TfNSW documents its own `.proto` files carrying TfNSW-assigned extensions (extension field numbers are mentioned in their release notes for the Sydney Trains/Metro v2 and light-rail feeds) for fields such as carriage-level occupancy. Protobuf ignores unknown fields on decode, so **the canonical bindings will decode the core trip-update fields correctly**; they simply will not surface the extensions. Transit Late Again does not use the extensions, so the canonical bindings are sufficient. If an extension field is ever needed, generate bindings from TfNSW's published `.proto` into `internal/gtfsrt/pb/` and vendor them — do not patch the upstream module.
 
 **Chosen approach.** Version the schedule and match against a snapshot.
 
@@ -1179,18 +1179,18 @@ There is a second, related trap: the generated bindings in `github.com/MobilityD
 
 **Edge cases that must be handled.** Each of these gets a test.
 
-1. `trip_id` present in the feed but absent from the active schedule → order-4 fallback, `matched=false`, counter `headway_unmatched_total{reason="unknown_trip"}`.
+1. `trip_id` present in the feed but absent from the active schedule → order-4 fallback, `matched=false`, counter `transitlateagain_unmatched_total{reason="unknown_trip"}`.
 2. `TripDescriptor.schedule_relationship` = `ADDED` → no schedule row exists by definition; `matched=false`, `reason="added"`. This must not count against the match-rate alert.
 3. `schedule_relationship` = `CANCELED` with **no** `stop_time_update` entries → synthesise one observation per scheduled stop of that trip, with `trip_rel=3` and `observed_delay_s=NULL`. Without this, cancellations are invisible in the rollup.
 4. `schedule_relationship` = `CANCELED` **with** stop-time updates present → use the updates, still marking `trip_rel=3`.
 5. An unknown `schedule_relationship` integer (the deprecated-value case) → store the integer, classify as "other", never panic, never drop.
-6. `StopTimeUpdate` with neither `arrival` nor `departure` → drop the update, increment `headway_updates_dropped_total{reason="no_time"}`.
+6. `StopTimeUpdate` with neither `arrival` nor `departure` → drop the update, increment `transitlateagain_updates_dropped_total{reason="no_time"}`.
 7. `StopTimeEvent` with `time` but no `delay` → compute `delay = time − scheduled_time`; requires an order-1 or order-2 match. If unmatched, `observed_delay_s` is `NULL` and `matched=false`.
 8. `StopTimeEvent` with `delay` but no `time` → use `delay` directly; no match needed for the delay, though one is still attempted for `route_id`.
 9. `stop_sequence` missing and the trip visits `stop_id` twice (a loop service) → ambiguous; order-3 fallback with `reason="ambiguous_stop"`.
 10. Gaps in `stop_sequence` (the feed sends stops 1, 2, 7, 8) → legal. Do not interpolate. Missing stops simply have no observation.
 11. `stop_sequence` present but with no matching schedule row (the feed is ahead of the bundle) → order-2, then order-3.
-12. Feed references a `stop_id` not in `stops` → still write the observation; `stop_id` is text, there is no foreign key. Counter `headway_unknown_stop_total`.
+12. Feed references a `stop_id` not in `stops` → still write the observation; `stop_id` is text, there is no foreign key. Counter `transitlateagain_unknown_stop_total`.
 13. `DirectionID` absent → stored as `NULL` in `observations`, `-1` in the rollup tables.
 14. The same trip appears twice in one feed message (duplicate entity) → the last one wins within a message; the primary key makes a second write a no-op anyway.
 15. Schedule swap happens mid-batch → observations in the batch may have been matched against different versions. Acceptable: `version_id` is not stored on observations. Documented as a deliberate loss of provenance. [DECIDED — revisit if a "why did the match rate change" investigation ever needs it.]
@@ -1214,7 +1214,7 @@ There is a second, related trap: the generated bindings in `github.com/MobilityD
 
 - *Store everything in UTC and derive the service date by truncating.* Rejected: wrong for every service running past midnight, which on the trains network is a nightly occurrence.
 - *Store stop times as `interval`.* Rejected: `interval` arithmetic across DST in Postgres depends on the session timezone, which makes the correctness of a stored value depend on how it is read.
-- *Set the container timezone to `Australia/Sydney` and use local time throughout.* Rejected: makes the service's behaviour depend on an environment variable, and `TZ` is exactly the sort of thing that differs between a laptop and a VM. `TZ` in Headway affects log rendering only, and there is a test that asserts flipping it does not change a computed service date.
+- *Set the container timezone to `Australia/Sydney` and use local time throughout.* Rejected: makes the service's behaviour depend on an environment variable, and `TZ` is exactly the sort of thing that differs between a laptop and a VM. `TZ` in Transit Late Again affects log rendering only, and there is a test that asserts flipping it does not change a computed service date.
 - *Ignore DST because it is two days a year.* Rejected: those two days produce wrong data with no error, which is the worst failure mode available.
 
 **Edge cases that must be handled.**
@@ -1225,7 +1225,7 @@ There is a second, related trap: the generated bindings in `github.com/MobilityD
 4. The April transition: the service day is 25 hours. `AtServiceOffset(d, 25*3600)` lands on 01:00 the next calendar day, not 02:00. Test it.
 5. The April transition: two distinct UTC instants render as `02:30 local`. Rollup buckets are keyed on `bucket_start timestamptz`, so both survive as separate rows; the API renders the offset (`+11:00` and `+10:00`) so a reader can tell them apart.
 6. An update arriving at 00:30 local for a trip that started at 23:50 the previous service date → when `start_date` is absent, `CandidateServiceDates` returns today then yesterday, and today's copy of the trip fails `SERVICE_DATE_TOLERANCE` (it is ~23 h away), so yesterday is chosen.
-7. `TripDescriptor.start_date` disagrees with the schedule (the producer says today, the trip only exists yesterday) → trust `start_date` and record `matched=false` rather than silently reassigning. Counter `headway_service_date_conflict_total`.
+7. `TripDescriptor.start_date` disagrees with the schedule (the producer says today, the trip only exists yesterday) → trust `start_date` and record `matched=false` rather than silently reassigning. Counter `transitlateagain_service_date_conflict_total`.
 8. Retention and partition creation use service dates in `servicetime.Loc`, not `time.Now().UTC()`. A partition boundary computed in UTC is ten or eleven hours off and will drop a partition that is still being written to.
 9. The transition Sunday needs 25 hours of partition coverage under a single `service_date`; since partitions are keyed on `service_date` (a `date`), not an instant, this is automatically correct. Note it in the test anyway so nobody "fixes" it.
 
@@ -1235,7 +1235,7 @@ There is a second, related trap: the generated bindings in `github.com/MobilityD
 
 **Chosen approach: four layers, in this order.**
 
-1. **Change filter (the big win).** Keep `map[Key]lastValue` in memory where `Key` is `(service_date, feed_id, trip_id, stop_sequence)` and `lastValue` is `(observed_delay_s, stop_time_rel, trip_rel)`. Admit an observation only when the value differs, or differs by more than `FILTER_MIN_DELTA_S`. A vehicle running exactly to schedule produces one row per stop per day instead of one per stop per poll. Expect this to remove the large majority of candidate rows; the `headway_filtered_total` / `headway_admitted_total` ratio is the number to quote.
+1. **Change filter (the big win).** Keep `map[Key]lastValue` in memory where `Key` is `(service_date, feed_id, trip_id, stop_sequence)` and `lastValue` is `(observed_delay_s, stop_time_rel, trip_rel)`. Admit an observation only when the value differs, or differs by more than `FILTER_MIN_DELTA_S`. A vehicle running exactly to schedule produces one row per stop per day instead of one per stop per poll. Expect this to remove the large majority of candidate rows; the `transitlateagain_filtered_total` / `transitlateagain_admitted_total` ratio is the number to quote.
 2. **Daily range partitioning.** `observations` is partitioned by `service_date`. Retention is `DROP TABLE`, which is instant and reclaims space immediately. `DELETE` on a large table does not return space to the filesystem without a `VACUUM FULL`, which needs a full second copy of the table — impossible on a tight disk.
 3. **Hourly rollups.** `otp_stop_hourly` and `otp_route_hourly` are computed from completed hours and are the only thing the history endpoints read. They are small — bounded by stops × routes × hours — and are never dropped.
 4. **Retention.** Drop partitions with `service_date < today − RETENTION_DAYS`, and only if `rollup_state.watermark` is past the end of that service date.
@@ -1253,11 +1253,11 @@ There is a second, related trap: the generated bindings in `github.com/MobilityD
 1. Filter map growth at end of service day — every trip id turns over daily. Evict entries whose `service_date` is more than one day old on every maintenance tick, and hard-cap at `FILTER_MAX_ENTRIES` with oldest-first eviction. Eviction causes redundant writes, never wrong data.
 2. Process restart clears the filter. The first poll after a restart therefore writes a full snapshot: a spike of tens of thousands of rows. This is correct and idempotent — the primary key absorbs any overlap — but the writer must be able to absorb the burst without dropping. Budget `INGEST_QUEUE_SIZE` for it.
 3. Retention must not run when the rollup is behind. Guard: `DropPartitionsBefore` reads `rollup_state.watermark` in the same transaction and returns an error rather than dropping.
-4. A partition that does not exist yet → writes fall into `observations_default`. This works but destroys the retention story, since a default partition cannot be dropped without losing everything in it. `EnsurePartitions` runs at startup and on every maintenance tick, and a non-empty `observations_default` is an alert. **Observed 2026-09-21:** with no maintenance job yet built, all 4,586 rows of a live run landed in the default partition, exactly as this case describes. It is the expected state until `internal/rollup` exists (Stage 3) and is the reason `HeadwayDefaultPartitionUsed` is a paging alert.
+4. A partition that does not exist yet → writes fall into `observations_default`. This works but destroys the retention story, since a default partition cannot be dropped without losing everything in it. `EnsurePartitions` runs at startup and on every maintenance tick, and a non-empty `observations_default` is an alert. **Observed 2026-09-21:** with no maintenance job yet built, all 4,586 rows of a live run landed in the default partition, exactly as this case describes. It is the expected state until `internal/rollup` exists (Stage 3) and is the reason `Transit Late AgainDefaultPartitionUsed` is a paging alert.
 5. `DROP TABLE` on a partition blocks behind any open transaction reading the parent. Retention runs with `SET lock_timeout = '5s'` and retries on the next tick rather than queueing behind a long analytical query.
 6. Clock moving backwards (NTP step) making "today" earlier than the newest partition → `EnsurePartitions` is idempotent (`CREATE TABLE IF NOT EXISTS`) and retention uses `<`, so a backwards step delays a drop rather than causing one.
 7. The rollup recomputing a bucket that has already been dropped from raw → the `ON CONFLICT DO UPDATE` would overwrite a good row with zeros. Guard: the rollup only processes hours whose service date still has a raw partition; otherwise it skips and logs at WARN.
-8. Disk filling anyway → Postgres refuses writes and the writer errors. The service must keep serving reads. The writer logs at ERROR, increments `headway_write_failures_total`, and drops the batch rather than blocking the matcher forever. Dropping is the correct behaviour here; the alternative is a stalled process that also cannot serve reads.
+8. Disk filling anyway → Postgres refuses writes and the writer errors. The service must keep serving reads. The writer logs at ERROR, increments `transitlateagain_write_failures_total`, and drops the batch rather than blocking the matcher forever. Dropping is the correct behaviour here; the alternative is a stalled process that also cannot serve reads.
 
 ### 9.4 Concurrency, backpressure and graceful shutdown
 
@@ -1270,7 +1270,7 @@ There is a second, related trap: the generated bindings in `github.com/MobilityD
 - A separate daily counter against `FEED_DAILY_BUDGET`, reset at UTC midnight. When exhausted, pollers sleep until reset and log at ERROR once.
 - Decoding and matching happen on the poller's goroutine. They are CPU-bound and short; a worker pool here would be premature. Stage 3 introduces a bounded worker pool (`INGEST_WORKERS`, default `GOMAXPROCS`) between decode and match if profiling shows it is needed, and not before.
 - One bounded channel `chan Observation` of `INGEST_QUEUE_SIZE`. This is the only backpressure mechanism.
-- **The channel is never blocked on.** The producer does a `select` with a `default` branch: if the queue is full, drop the observation and increment `headway_dropped_total{reason="queue_full"}`. Blocking would back-pressure into the poller, which would miss polls, which loses data permanently; dropping loses one observation which the next poll will re-send. Dropping is strictly better here. [DECIDED — revisit if the drop counter is ever non-zero in steady state, which means the writer is too slow, not that the policy is wrong.]
+- **The channel is never blocked on.** The producer does a `select` with a `default` branch: if the queue is full, drop the observation and increment `transitlateagain_dropped_total{reason="queue_full"}`. Blocking would back-pressure into the poller, which would miss polls, which loses data permanently; dropping loses one observation which the next poll will re-send. Dropping is strictly better here. [DECIDED — revisit if the drop counter is ever non-zero in steady state, which means the writer is too slow, not that the policy is wrong.]
 - One writer goroutine. Batches flush on size or interval. A single writer means no write-write contention and no need for advisory locks.
 - The API never touches the ingest path. `/now` reads the latest-state cache under an `RWMutex` held for microseconds; history reads go through the pool.
 
@@ -1316,10 +1316,10 @@ Step 4 must happen only after step 3. Closing a channel that a producer still wr
 **Chosen approach.**
 
 - `feed_ts` in `observations` is **always** `FeedHeader.timestamp`, never our clock. It is what makes replays idempotent.
-- `ingested_at` is our clock. Freshness lag is `ingested_at − feed_ts`, measured at write time into `headway_freshness_lag_seconds`.
-- Staleness is detected per feed: if `FeedHeader.timestamp` has not advanced across `FEED_STALE_POLLS` (default 8, i.e. two minutes at the default interval) consecutive successful responses, mark the feed stale, stop admitting its observations, and set `headway_feed_stale{feed_id}` to 1. A stale feed is an alert, not a crash.
-- Skew is detected, not corrected: if `|FeedHeader.timestamp − now| > FEED_MAX_SKEW` (default 5 m), log at WARN with both values, record `headway_feed_skew_seconds{feed_id}`, and **still ingest**. Correcting a clock you do not control produces data that cannot be reconciled with the source.
-- When both `delay` and `time` are present and disagree by more than `DELAY_RECONCILE_TOLERANCE_S` (default 60) against the schedule, prefer `delay`, because `delay` is what the producer computed against its own timetable and is therefore internally consistent. Record `headway_delay_disagreement_total`.
+- `ingested_at` is our clock. Freshness lag is `ingested_at − feed_ts`, measured at write time into `transitlateagain_freshness_lag_seconds`.
+- Staleness is detected per feed: if `FeedHeader.timestamp` has not advanced across `FEED_STALE_POLLS` (default 8, i.e. two minutes at the default interval) consecutive successful responses, mark the feed stale, stop admitting its observations, and set `transitlateagain_feed_stale{feed_id}` to 1. A stale feed is an alert, not a crash.
+- Skew is detected, not corrected: if `|FeedHeader.timestamp − now| > FEED_MAX_SKEW` (default 5 m), log at WARN with both values, record `transitlateagain_feed_skew_seconds{feed_id}`, and **still ingest**. Correcting a clock you do not control produces data that cannot be reconciled with the source.
+- When both `delay` and `time` are present and disagree by more than `DELAY_RECONCILE_TOLERANCE_S` (default 60) against the schedule, prefer `delay`, because `delay` is what the producer computed against its own timetable and is therefore internally consistent. Record `transitlateagain_delay_disagreement_total`.
 
 **Approaches rejected.**
 
@@ -1329,7 +1329,7 @@ Step 4 must happen only after step 3. Closing a channel that a producer still wr
 
 **Edge cases that must be handled.**
 
-1. `FeedHeader.timestamp` is zero or absent → fall back to `FetchedAt` and set a flag; increment `headway_missing_header_ts_total`. Idempotency degrades to "per fetch" for that feed.
+1. `FeedHeader.timestamp` is zero or absent → fall back to `FetchedAt` and set a flag; increment `transitlateagain_missing_header_ts_total`. Idempotency degrades to "per fetch" for that feed.
 2. `FeedHeader.timestamp` in the future by more than `FEED_MAX_SKEW` → ingest, warn, and never use it to compute a negative freshness lag; clamp the metric at zero.
 3. The header timestamp goes *backwards* between polls (a producer failover) → treat as stale-but-valid; do not reject. The primary key means an older `feed_ts` for a key we already have simply inserts an additional row, which the rollup's `DISTINCT ON ... ORDER BY feed_ts DESC` ignores.
 4. HTTP 200 with a zero-length body → not an error at the transport layer but is one here. Reject, count as a failed poll, do not reset the failure counter.
@@ -1354,7 +1354,7 @@ Step 4 must happen only after step 3. Closing a channel that a producer still wr
 | Database reads (API) | No retry. Return 500 fast; the client can retry. |
 | Timeouts | Feed HTTP `FEED_HTTP_TIMEOUT` (20 s). Batch write 10 s. API handler 15 s via `http.TimeoutHandler`. Schedule download 5 m. Every database call takes a context with a deadline; there are no unbounded calls. |
 | Partial batch failure | The batch is one statement (`INSERT ... ON CONFLICT DO NOTHING` via a `pgx.Batch`, or `CopyFrom` into a temporary table then an insert-select). It succeeds or fails whole. No per-row error handling. |
-| Panic | `recover` at three places only: each poller goroutine, the writer goroutine, and the HTTP middleware. Log the stack at ERROR, increment `headway_panics_total`, continue. Nowhere else — a panic in `servicetime` should crash the process during development. |
+| Panic | `recover` at three places only: each poller goroutine, the writer goroutine, and the HTTP middleware. Log the stack at ERROR, increment `transitlateagain_panics_total`, continue. Nowhere else — a panic in `servicetime` should crash the process during development. |
 | Graceful shutdown | See §9.4. |
 | Fail-fast | Configuration errors, an unloadable timezone, and an unreachable database *at startup* exit with code 2. The same failures at runtime do not exit. |
 
@@ -1390,33 +1390,33 @@ Prometheus, exposed on `/metrics`. Stage 4, but the names are fixed now so dashb
 
 | Metric | Type | Labels | Meaning |
 |---|---|---|---|
-| `headway_feed_requests_total` | counter | `feed_id`, `outcome` (`ok`,`not_modified`,`rate_limited`,`quota`,`unauthorized`,`timeout`,`error`) | Every upstream request. |
-| `headway_feed_request_duration_seconds` | histogram | `feed_id` | Upstream latency. |
-| `headway_feed_age_seconds` | gauge | `feed_id` | `now − FeedHeader.timestamp` at last successful poll. |
-| `headway_feed_stale` | gauge | `feed_id` | 1 when stale. |
-| `headway_feed_skew_seconds` | gauge | `feed_id` | Signed difference between header timestamp and local clock. |
-| `headway_updates_decoded_total` | counter | `feed_id` | Stop-time updates decoded. |
-| `headway_updates_dropped_total` | counter | `feed_id`, `reason` | Dropped in decode or match. |
-| `headway_matched_total` | counter | `feed_id`, `order` (`1`..`3`) | Matches by resolution order. |
-| `headway_unmatched_total` | counter | `feed_id`, `reason` | Order-4 outcomes. |
-| `headway_match_rate` | gauge | `feed_id` | 15-minute sliding ratio, excluding `reason="added"`. |
-| `headway_filtered_total` | counter | `feed_id` | Suppressed by the change filter. |
-| `headway_admitted_total` | counter | `feed_id` | Passed the change filter. |
-| `headway_queue_length` | gauge | — | Current channel occupancy. |
-| `headway_dropped_total` | counter | `reason` | Dropped because the queue was full. |
-| `headway_rows_written_total` | counter | — | Rows actually inserted (not attempted). |
-| `headway_write_batch_duration_seconds` | histogram | — | Batch write latency. |
-| `headway_write_failures_total` | counter | `retryable` | Failed batches after retries. |
-| `headway_freshness_lag_seconds` | histogram | `feed_id` | `ingested_at − feed_ts`. The headline number. |
-| `headway_schedule_version` | gauge | `feed_id` | Active `version_id`. |
-| `headway_schedule_load_duration_seconds` | histogram | `feed_id` | — |
-| `headway_rollup_duration_seconds` | histogram | — | — |
-| `headway_rollup_lag_seconds` | gauge | — | `now − rollup_state.watermark`. |
-| `headway_partitions` | gauge | — | Count of daily partitions. |
-| `headway_default_partition_rows` | gauge | — | Should always be 0. |
-| `headway_http_requests_total` | counter | `route`, `status` | `route` is the ServeMux pattern, never the raw path — a raw path would explode cardinality. |
-| `headway_http_request_duration_seconds` | histogram | `route` | — |
-| `headway_panics_total` | counter | `component` | — |
+| `transitlateagain_feed_requests_total` | counter | `feed_id`, `outcome` (`ok`,`not_modified`,`rate_limited`,`quota`,`unauthorized`,`timeout`,`error`) | Every upstream request. |
+| `transitlateagain_feed_request_duration_seconds` | histogram | `feed_id` | Upstream latency. |
+| `transitlateagain_feed_age_seconds` | gauge | `feed_id` | `now − FeedHeader.timestamp` at last successful poll. |
+| `transitlateagain_feed_stale` | gauge | `feed_id` | 1 when stale. |
+| `transitlateagain_feed_skew_seconds` | gauge | `feed_id` | Signed difference between header timestamp and local clock. |
+| `transitlateagain_updates_decoded_total` | counter | `feed_id` | Stop-time updates decoded. |
+| `transitlateagain_updates_dropped_total` | counter | `feed_id`, `reason` | Dropped in decode or match. |
+| `transitlateagain_matched_total` | counter | `feed_id`, `order` (`1`..`3`) | Matches by resolution order. |
+| `transitlateagain_unmatched_total` | counter | `feed_id`, `reason` | Order-4 outcomes. |
+| `transitlateagain_match_rate` | gauge | `feed_id` | 15-minute sliding ratio, excluding `reason="added"`. |
+| `transitlateagain_filtered_total` | counter | `feed_id` | Suppressed by the change filter. |
+| `transitlateagain_admitted_total` | counter | `feed_id` | Passed the change filter. |
+| `transitlateagain_queue_length` | gauge | — | Current channel occupancy. |
+| `transitlateagain_dropped_total` | counter | `reason` | Dropped because the queue was full. |
+| `transitlateagain_rows_written_total` | counter | — | Rows actually inserted (not attempted). |
+| `transitlateagain_write_batch_duration_seconds` | histogram | — | Batch write latency. |
+| `transitlateagain_write_failures_total` | counter | `retryable` | Failed batches after retries. |
+| `transitlateagain_freshness_lag_seconds` | histogram | `feed_id` | `ingested_at − feed_ts`. The headline number. |
+| `transitlateagain_schedule_version` | gauge | `feed_id` | Active `version_id`. |
+| `transitlateagain_schedule_load_duration_seconds` | histogram | `feed_id` | — |
+| `transitlateagain_rollup_duration_seconds` | histogram | — | — |
+| `transitlateagain_rollup_lag_seconds` | gauge | — | `now − rollup_state.watermark`. |
+| `transitlateagain_partitions` | gauge | — | Count of daily partitions. |
+| `transitlateagain_default_partition_rows` | gauge | — | Should always be 0. |
+| `transitlateagain_http_requests_total` | counter | `route`, `status` | `route` is the ServeMux pattern, never the raw path — a raw path would explode cardinality. |
+| `transitlateagain_http_request_duration_seconds` | histogram | `route` | — |
+| `transitlateagain_panics_total` | counter | `component` | — |
 
 ### 10.4 Alerts
 
@@ -1424,13 +1424,13 @@ One alert is required by the Definition of Done; these are the candidates, in pr
 
 | Alert | Condition | Severity | First response |
 |---|---|---|---|
-| `HeadwayIngestStopped` | `rate(headway_rows_written_total[10m]) == 0` for 15 m during service hours | page | Check `/v1/admin/stats`; check feed outcomes; check the disk. |
-| `HeadwayFeedStale` | `headway_feed_stale == 1` for 10 m | warn | Usually upstream. Check the TfNSW API status page before touching anything. |
-| `HeadwayQuotaExhausted` | `increase(headway_feed_requests_total{outcome="quota"}[1h]) > 0` | page | Reduce `FEED_POLL_INTERVAL` or disable a feed; the quota resets daily. |
-| `HeadwayMatchRateLow` | `headway_match_rate < 0.8` for 30 m | warn | The schedule is probably stale or the bundle changed shape. Check `schedule_versions.loaded_at`. |
-| `HeadwayFreshnessDegraded` | `histogram_quantile(0.95, headway_freshness_lag_seconds) > 60` for 15 m | warn | Writer is behind. Check `headway_queue_length` and disk IOPS. |
-| `HeadwayDefaultPartitionUsed` | `headway_default_partition_rows > 0` | page | `EnsurePartitions` is not running. Fix before retention runs. |
-| `HeadwayDiskLow` | node disk free < 15 % | page | Reduce `RETENTION_DAYS` and run `headway -maintain-once` (`make maintain`; on the VM `docker compose run --rm headway -maintain-once`). |
+| `Transit Late AgainIngestStopped` | `rate(transitlateagain_rows_written_total[10m]) == 0` for 15 m during service hours | page | Check `/v1/admin/stats`; check feed outcomes; check the disk. |
+| `Transit Late AgainFeedStale` | `transitlateagain_feed_stale == 1` for 10 m | warn | Usually upstream. Check the TfNSW API status page before touching anything. |
+| `Transit Late AgainQuotaExhausted` | `increase(transitlateagain_feed_requests_total{outcome="quota"}[1h]) > 0` | page | Reduce `FEED_POLL_INTERVAL` or disable a feed; the quota resets daily. |
+| `Transit Late AgainMatchRateLow` | `transitlateagain_match_rate < 0.8` for 30 m | warn | The schedule is probably stale or the bundle changed shape. Check `schedule_versions.loaded_at`. |
+| `Transit Late AgainFreshnessDegraded` | `histogram_quantile(0.95, transitlateagain_freshness_lag_seconds) > 60` for 15 m | warn | Writer is behind. Check `transitlateagain_queue_length` and disk IOPS. |
+| `Transit Late AgainDefaultPartitionUsed` | `transitlateagain_default_partition_rows > 0` | page | `EnsurePartitions` is not running. Fix before retention runs. |
+| `Transit Late AgainDiskLow` | node disk free < 15 % | page | Reduce `RETENTION_DAYS` and run `transitlateagain -maintain-once` (`make maintain`; on the VM `docker compose run --rm transitlateagain -maintain-once`). |
 
 ---
 
@@ -1473,7 +1473,7 @@ One alert is required by the Definition of Done; these are the candidates, in pr
 6. `go test -race -count=1 ./...` (unit only).
 7. Start a `postgres:18-alpine` service container; run `go test -race -tags=integration -count=1 ./...` with `DATABASE_URL_TEST` pointed at it.
 8. `go test -tags=integration -coverprofile=coverage.out ./...` and print the total (the tag since 2026-09-23: without it the SQL-heavy packages report a third of their real coverage). No coverage gate in v1 — a gate on a project this size encourages testing the wrong things. [DECIDED — revisit at Stage 4.]
-9. Cross-compile check: `GOOS=linux GOARCH=amd64 go build ./cmd/headway`. This catches the single most likely deployment failure.
+9. Cross-compile check: `GOOS=linux GOARCH=amd64 go build ./cmd/transitlateagain`. This catches the single most likely deployment failure.
 
 `.github/workflows/docker.yml`, on a tag: build `linux/amd64` and push to GitHub Container Registry.
 
@@ -1524,7 +1524,7 @@ Each stage ends in something that runs and can be demonstrated. **Stage 2 is the
 - [x] Per-feed schedule versions (the loader already supports it; confirm multi-feed activation is independent). `TestLoad_SeveralFeeds_ActivateIndependently`; five versions active side by side live.
 - [x] Bounded worker pool between decode and match, sized by `INGEST_WORKERS`, **only if** profiling shows the poller goroutine is the bottleneck. If it is not, write down that it is not and skip it. **It is not; skipped.** A full trains poll decodes and matches in 6.6 ms against a 15 s interval (`BenchmarkPoll_DecodeAndMatch_RecordedTrains`, `docs/loadtest.md`).
 - [x] Daily partition creation and retention running on the maintenance tick; `observations_default` verified empty. `default_partition_rows: 0` in `/v1/admin/stats` on the dev database and on a fresh Compose stack, 2026-09-23. A live drop has not happened yet — no partition is older than `RETENTION_DAYS` — so the drop itself is proven by the integration tests only.
-- [x] `cmd/maintain` as a standalone entry point for manual runs. Built as `headway -maintain-once` (`make maintain`) rather than a second binary, for the reason `-migrate-only` is a flag: the distroless image carries one binary (§15).
+- [x] `cmd/maintain` as a standalone entry point for manual runs. Built as `transitlateagain -maintain-once` (`make maintain`) rather than a second binary, for the reason `-migrate-only` is a flag: the distroless image carries one binary (§15).
 - [ ] Storage measured before and after rollups; `docs/storage.md` written with real numbers. **Started 2026-09-23:** 265.9 bytes/row raw, and one real hour rolled up (7,105 raw rows → 646). A full day of data does not exist yet — it needs the service running for 24 h, which means the VM.
 - [x] Load test with k6 or hey at 50 RPS against `/now` and `/history`; `docs/loadtest.md` with p50/p95/p99. `hey`, 5 min × 50 RPS each, all 15,000 requests 200: `/now` p95 1.4 ms, stop history (30 d) p95 24 ms, route history p95 21 ms.
 - [x] Profile under load (`pprof` behind `HTTP_ADDR` on a separate, non-public port) and record one thing that was fixed as a result. `PPROF_ADDR`, loopback-only. Fixed: stop history read ~24,000 rollup rows a request (212 % CPU at 50 RPS); the rollup now writes exact all-routes rows per stop and hour, and it reads 720 (p50 99 → 19 ms, CPU 13.6 %). A first attempt in SQL was 120× worse, via a generic plan (`docs/loadtest.md`).
@@ -1535,7 +1535,7 @@ Each stage ends in something that runs and can be demonstrated. **Stage 2 is the
 - [ ] `internal/obs/metrics.go` with every metric in §10.3.
 - [ ] `/metrics` endpoint; Grafana Cloud free tier scraping it.
 - [ ] One dashboard: ingest rate, freshness p95, match rate, queue length, partition count, API p95.
-- [ ] One alert wired end to end — `HeadwayIngestStopped` — with a `docs/runbook.md` entry.
+- [ ] One alert wired end to end — `Transit Late AgainIngestStopped` — with a `docs/runbook.md` entry.
 - [ ] `web/`: Next.js, one page, a line selector and a stop history chart hitting the live API.
 - [ ] Optional: custom domain and TLS via Caddy in Compose.
 - **Demo:** "here is the dashboard, and here is what happens when I stop the container."
@@ -1548,10 +1548,10 @@ These are the numbers that go in the README and on the resume. Anything marked "
 
 | What | How to measure | Target |
 |---|---|---|
-| Updates ingested per minute | `rate(headway_updates_decoded_total[5m]) * 60`, peak hour | **First measurement 2026-09-21, 13:00 Sunday (off-peak), trains feed only: ~3,940 updates per poll, ~15,700 per minute at four polls.** Peak-hour figure still TBD. |
-| Rows written per minute | `rate(headway_rows_written_total[5m]) * 60` | **First measurement 2026-09-21 (off-peak): ~670 rows/min in steady state**, after the cold-filter burst of 3,913 rows on the first poll. |
-| Change-filter suppression ratio | `headway_filtered_total / (headway_filtered_total + headway_admitted_total)` | ≥ 0.90. **First measurement 2026-09-21: 3,939 of 3,939 updates (100 %) were byte-identical across two polls 15 s apart** — delays, relationships and absolute predicted times all unchanged, with no keys added or removed. One off-peak Sunday sample, so treat it as an upper bound rather than the steady-state figure, and re-measure at peak in Stage 3. **A live five-poll run the same day measured 95.7 % in steady state** (673 admitted of 15,819 submitted, excluding the cold-filter first poll), against the ≥ 0.90 target. It does establish that the producer republishes on a 15 s header cadence while changing core content far less often. |
-| Freshness lag p50 | `histogram_quantile(0.5, headway_freshness_lag_seconds)` | ≤ 10 s |
+| Updates ingested per minute | `rate(transitlateagain_updates_decoded_total[5m]) * 60`, peak hour | **First measurement 2026-09-21, 13:00 Sunday (off-peak), trains feed only: ~3,940 updates per poll, ~15,700 per minute at four polls.** Peak-hour figure still TBD. |
+| Rows written per minute | `rate(transitlateagain_rows_written_total[5m]) * 60` | **First measurement 2026-09-21 (off-peak): ~670 rows/min in steady state**, after the cold-filter burst of 3,913 rows on the first poll. |
+| Change-filter suppression ratio | `transitlateagain_filtered_total / (transitlateagain_filtered_total + transitlateagain_admitted_total)` | ≥ 0.90. **First measurement 2026-09-21: 3,939 of 3,939 updates (100 %) were byte-identical across two polls 15 s apart** — delays, relationships and absolute predicted times all unchanged, with no keys added or removed. One off-peak Sunday sample, so treat it as an upper bound rather than the steady-state figure, and re-measure at peak in Stage 3. **A live five-poll run the same day measured 95.7 % in steady state** (673 admitted of 15,819 submitted, excluding the cold-filter first poll), against the ≥ 0.90 target. It does establish that the producer republishes on a 15 s header cadence while changing core content far less often. |
+| Freshness lag p50 | `histogram_quantile(0.5, transitlateagain_freshness_lag_seconds)` | ≤ 10 s |
 | Freshness lag p95 | `histogram_quantile(0.95, ...)` | ≤ 30 s |
 | API p95 latency, `/now` | k6/hey at 50 RPS for 5 min | ≤ 100 ms. **Measured 2026-09-24: 1.4 ms** (p50 0.8), laptop, `docs/loadtest.md`. |
 | API p95 latency, `/history` (30 d, hourly) | same run | ≤ 300 ms. **Measured 2026-09-24: 24.0 ms** for the busiest stop (123.4 before the fix), 21.1 ms for a route. |
@@ -1560,12 +1560,12 @@ These are the numbers that go in the README and on the resume. Anything marked "
 | Storage per day, rollups only | Size delta of `otp_*_hourly` per day | baseline TBD |
 | Memory, deployed shape | `docker stats` under Compose | **Measured 2026-09-23:** service 140.8 MiB with the whole timetable loaded, Postgres 299.9 MiB (`shared_buffers=128MB`), ~440 MiB together against the VM's 1 GB. |
 | Storage reduction from rollups | `1 − (rollup bytes / raw bytes)` for the same day | baseline TBD; report honestly |
-| Total database size at steady state | `pg_database_size('headway')` after `RETENTION_DAYS` have elapsed | ≤ 10 GB |
-| Match rate | `headway_match_rate`, trains feed, excluding `ADDED` | ≥ 0.90. **Measured 2026-09-23: 0.9967** over four consecutive live polls, from the matcher's own counts (the metric itself is Stage 4). |
-| Upstream requests per day | `increase(headway_feed_requests_total[24h])` | ≤ `FEED_DAILY_BUDGET` |
+| Total database size at steady state | `pg_database_size('transitlateagain')` after `RETENTION_DAYS` have elapsed | ≤ 10 GB |
+| Match rate | `transitlateagain_match_rate`, trains feed, excluding `ADDED` | ≥ 0.90. **Measured 2026-09-23: 0.9967** over four consecutive live polls, from the matcher's own counts (the metric itself is Stage 4). |
+| Upstream requests per day | `increase(transitlateagain_feed_requests_total[24h])` | ≤ `FEED_DAILY_BUDGET` |
 | Test count and coverage | `go test ./... -coverprofile` total | **Measured 2026-09-23: 367 tests and subtests with `-tags=integration` (319 unit-only), 80.2 % of statements** including `cmd/` at 0 %; packages range 79.8 % (`rollup`) to 100 % (`cache`). |
 | Uptime | `time() - process_start_time_seconds`, plus a note of the longest unbroken run | ≥ 7 days for the Definition of Done |
-| Dropped observations | `headway_dropped_total` | 0 in steady state |
+| Dropped observations | `transitlateagain_dropped_total` | 0 in steady state |
 
 For the resume bullets, fill the placeholders from this table and **do not round upward**. "Processing 4,200 updates per minute" is a better line than "processing 10,000+" if 4,200 is what it does, because the follow-up question is always "how did you measure that".
 
@@ -1582,7 +1582,7 @@ Rules for writing code in this repository.
 - Acronyms keep their case: `HTTPClient`, `tripID`, `feedID`, `routeID`, `stopID`. Never `Http`, never `Id`.
 - Test names: `TestThing_Condition_Expectation`, e.g. `TestMatch_TripIDMissing_FallsBackToStopID`. Subtests use a plain sentence.
 - SQL: lowercase `snake_case` identifiers, uppercase keywords. Tables plural, columns singular. Duration columns end in `_s`.
-- Env vars: `SCREAMING_SNAKE_CASE`, prefixed `HEADWAY_` only where the unprefixed name would be ambiguous (`DATABASE_URL` and `TZ` stay unprefixed by convention).
+- Env vars: `SCREAMING_SNAKE_CASE`, unprefixed. The two that carried a `HEADWAY_` prefix lost it in the 2026-09-24 rename (`FEEDS_FILE`, `ENABLED_FEEDS`).
 - Files: one concept per file, named after it. `matcher.go` holds `Matcher`. No `misc.go`.
 
 ### Comments
@@ -1768,6 +1768,7 @@ Append-only. To reverse a decision, add a row that names the one it supersedes.
 | 2026-09-24 | The VM runs `HTTP_RATE_LIMIT_RPS=10` (the default stays 50), and `deploy/firewall.sh` caps each source IP at 20 open and 20 new connections a second (burst 40) on port 8080, in Docker's `DOCKER-USER` chain, applied at boot by `headway-firewall.service`. | A history query costs ~20 ms of the one vCPU, so 50 a second from one IP saturates it. The kernel limits drop a single-source flood before each connection costs a goroutine. ufw cannot express either, because Docker DNATs published ports ahead of it. | Leaving 50 (one client can starve ingest of CPU); ufw rules (never see Docker's traffic); fail2ban (reacts to logs after the load has landed); Cloudflare now (needs a domain; the answer to a many-source flood, deferred to Stage 4's TLS item). |
 | 2026-09-24 | The latest-state cache drops a stop once its scheduled time plus observed delay is more than 10 minutes behind the feed timestamp (§9.1 case 18), superseding the 2026-09-23 row's assumption that a trip's first reported stop is its next one. A constant, not configuration. | The producers keep finished trips and served stops; `/now` was reporting 21 % ghost trips, all "on time". Judging in the cache fixes `/v1/lines/{id}/now` and `/v1/stops/{id}/now` at once, and the feed timestamp keeps it replay-deterministic. Ten minutes sits above the dwell-and-lag cluster (0–5 min past: 27 trips) and far below the ghosts (hours). | Filtering in each handler (two copies of one rule); judging by our clock (not replayable); dropping served stops at ingest (the raw record should keep what the producer said). |
 | 2026-09-24 | Supersedes the previous row's 10 minutes: a stop is served 5 minutes after its predicted time. | Measured after deploying 10: nothing was left over 15 minutes past, but 58 of 643 trips showed as next a stop 5–10 minutes behind, the one they had just left, where before the change only 5 trips sat in that band and 27 within 0–5. | 10 minutes (shows the stop just left); 2 minutes (inside the lag of a 15 s poll plus a stale feed, so a train dwelling on time would jump a stop early). |
+| 2026-09-24 | The project is renamed from Headway to **Transit Late Again** (`transitlateagain`), with the domain `transitlateagain.dev`: module, command, image, Compose project, metric prefix, firewall unit and `/opt` path. Rows above this one keep the old name, because this log is append-only. `HEADWAY_FEEDS_FILE` and `HEADWAY_ENABLED_FEEDS` become `FEEDS_FILE` and `ENABLED_FEEDS`. The Postgres role and database stay `headway`, and the Compose volume is pinned to `headway_pgdata`. | The user found Headway vague and wanted a plain name for a showcase dashboard, not a product name; `.dev` says developer project, where `.au` says local service. Renaming before Stage 4 means the metric names are only ever published once. | whereismytrain (taken, and an existing app); howlate.au, ismytrainlate.au (offered, not chosen); renaming the Postgres role and database (downtime on the VM for a name nobody sees); letting the Compose volume follow the project name (the VM would start on an empty database). |
 
 ---
 
@@ -1778,7 +1779,7 @@ Each needs the human's input. Each has a default that will be used until it is a
 | # | Question | Default until answered |
 |---|---|---|
 | 1 | **Is the TfNSW account plan actually the default one?** The published documentation describes a default "Bronze Plan" with a 60,000-request daily quota and a 5-requests-per-second rate limit. Confirm this is what the key actually has, since exceeding it returns HTTP 403 rather than a soft failure, and the whole poll-interval budget depends on it. | Assume 60,000/day and 5/s. Run with `FEED_RATE_LIMIT_RPS=4` and `FEED_DAILY_BUDGET=55000`. |
-| 2 | **What is the definition of "late" that this project should report?** TfNSW publishes its own on-time performance definitions, and they differ by mode (suburban trains use a tolerance measured in minutes; other modes differ). Headway should either match the official definition, so the numbers are comparable, or state plainly that it uses its own. Look up the current published definition before claiming parity. | Use Headway's own: early < −60 s, on time −60 s to +300 s, late > +300 s, very late > +900 s. State in the README that this is Headway's definition, not TfNSW's. |
+| 2 | **What is the definition of "late" that this project should report?** TfNSW publishes its own on-time performance definitions, and they differ by mode (suburban trains use a tolerance measured in minutes; other modes differ). Transit Late Again should either match the official definition, so the numbers are comparable, or state plainly that it uses its own. Look up the current published definition before claiming parity. | Use Transit Late Again's own: early < −60 s, on time −60 s to +300 s, late > +300 s, very late > +900 s. State in the README that this is Transit Late Again's definition, not TfNSW's. |
 | 3 | **Arrival or departure?** On-time performance can be measured at arrival (what a passenger waiting at the destination sees) or departure (what a passenger boarding sees). They differ at terminus stops and at stops with long dwell times. | `observed_delay_s` = `departure_delay` when present, else `arrival_delay`, else `NULL`. Rationale: most stops in the feed are intermediate and the boarding passenger is the primary user. Both raw values are stored, so the choice is reversible without re-ingesting. |
 | 4 | **How do cancellations count in the on-time percentage?** Excluding them flatters the number; counting them as "not on time" conflates two different failures. | Excluded from `on_time_pct` and reported as a separate `n_cancelled` column, which the API returns alongside. The README says so explicitly. |
 | 5 | **ANSWERED 2026-09-23 — see the Decision Log.** **Which feeds at Stage 3, and in what order?** Each feed costs quota and adds edge cases. Buses is by far the largest. | **Decided:** metro, ferries, CBD & South East and Parramatta light rail, all enabled; buses off by the user's choice, for memory and disk rather than quota (`docs/quota.md`). |
@@ -1798,20 +1799,20 @@ Each needs the human's input. Each has a default that will be used until it is a
 |---|---|
 | **AEST / AEDT** | Australian Eastern Standard Time (UTC+10) and Australian Eastern Daylight Time (UTC+11). Sydney switches between them twice a year. |
 | **ADDED** | A GTFS-realtime `TripDescriptor.schedule_relationship` value meaning the trip is not in the static timetable. Such trips can never be matched; they are excluded from the match-rate metric. |
-| **Backpressure** | Letting a slow consumer slow a fast producer. In Headway the bounded channel is the only backpressure point, and it drops rather than blocks. |
+| **Backpressure** | Letting a slow consumer slow a fast producer. In Transit Late Again the bounded channel is the only backpressure point, and it drops rather than blocks. |
 | **Bronze Plan** | The name TfNSW's documentation gives to the default API account plan, documented as 60,000 requests per day at 5 per second. See Open Question 1. |
 | **CANCELED** | A `TripDescriptor.schedule_relationship` value meaning a scheduled trip will not run. Spelled with one L in the specification. |
-| **Change filter** | Headway's component (5) that suppresses an observation whose delay and status are unchanged since the last write for the same trip and stop. The main storage-saving mechanism. |
+| **Change filter** | Transit Late Again's component (5) that suppresses an observation whose delay and status are unchanged since the last write for the same trip and stop. The main storage-saving mechanism. |
 | **COPY** | The PostgreSQL bulk-load protocol, exposed by pgx as `CopyFrom`. Faster than multi-row `INSERT` for batches. |
 | **Default partition** | A partition of a partitioned table that receives rows matching no other partition. Present so writes never fail; a non-empty one is an alert. |
-| **Freshness lag** | `ingested_at − feed_ts`: how long after the producer stamped the data it became queryable in Headway. The headline latency metric. |
+| **Freshness lag** | `ingested_at − feed_ts`: how long after the producer stamped the data it became queryable in Transit Late Again. The headline latency metric. |
 | **GTFS** | General Transit Feed Specification. The static timetable format: a zip of CSV files (`trips.txt`, `stop_times.txt`, `calendar.txt`, …). |
-| **GTFS-realtime / GTFS-R** | The realtime companion to GTFS: protocol-buffer messages fetched over HTTP, containing trip updates, vehicle positions and alerts. Headway consumes trip updates only. |
-| **GTFS bundle** | One downloaded static GTFS zip. TfNSW publishes a "complete" bundle for all operators and separate per-mode bundles for operators that support realtime; Headway uses the latter. |
+| **GTFS-realtime / GTFS-R** | The realtime companion to GTFS: protocol-buffer messages fetched over HTTP, containing trip updates, vehicle positions and alerts. Transit Late Again consumes trip updates only. |
+| **GTFS bundle** | One downloaded static GTFS zip. TfNSW publishes a "complete" bundle for all operators and separate per-mode bundles for operators that support realtime; Transit Late Again uses the latter. |
 | **Idempotent write** | A write that can be repeated without changing the result. Here, `INSERT ... ON CONFLICT DO NOTHING` against the observations natural key. |
 | **Match rate** | The share of realtime stop-time updates resolved to a scheduled trip. The primary health signal for the matcher. |
 | **NO_DATA** | A `StopTimeUpdate.schedule_relationship` value meaning no realtime information is available for that stop. |
-| **Observation** | Headway's unit of stored data: one delay measurement for one stop of one trip at one feed timestamp. |
+| **Observation** | Transit Late Again's unit of stored data: one delay measurement for one stop of one trip at one feed timestamp. |
 | **On-time performance (OTP)** | The share of observations whose delay falls inside the on-time window. See Open Question 2 for the definition used. |
 | **Partition pruning** | The planner's ability to skip partitions that cannot contain matching rows, given a predicate on the partition key. The reason every query filters on `service_date`. |
 | **Protocol Buffers / protobuf** | Google's binary serialisation format. GTFS-realtime feeds are protobuf, so the response body is not human-readable. |
@@ -1823,7 +1824,7 @@ Each needs the human's input. Each has a default that will be used until it is a
 | **SKIPPED** | A `StopTimeUpdate.schedule_relationship` value meaning the vehicle will not call at that stop. |
 | **Stale feed** | A feed whose `FeedHeader.timestamp` has not advanced across several consecutive successful polls. The request succeeds; the data is dead. |
 | **stop_sequence** | The 1-based (in practice, monotonically increasing) position of a stop within a trip. May have gaps. The preferred stop anchor when present. |
-| **StopTimeUpdate** | The GTFS-realtime message describing a predicted arrival or departure at one stop of one trip. Headway's raw input unit. |
+| **StopTimeUpdate** | The GTFS-realtime message describing a predicted arrival or departure at one stop of one trip. Transit Late Again's raw input unit. |
 | **TCB** | Transport Connected Bus. The label TfNSW uses for its regional bus services in some feed documentation. |
 | **TfNSW** | Transport for NSW, the agency publishing the feeds, via its Open Data Hub at `opendata.transport.nsw.gov.au`. |
 | **Throttle limit** | TfNSW's per-second request cap. Exceeding it returns HTTP 403 with `X-Error-Detail: Account Over Rate Limit`, distinct from the daily quota. |

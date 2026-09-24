@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zigzaggoose/headway/internal/config"
+	"github.com/zigzaggoose/transitlateagain/internal/config"
 )
 
 func quietLogger() *slog.Logger {

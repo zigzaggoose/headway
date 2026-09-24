@@ -7,8 +7,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/zigzaggoose/headway/internal/servicetime"
-	"github.com/zigzaggoose/headway/internal/store"
+	"github.com/zigzaggoose/transitlateagain/internal/servicetime"
+	"github.com/zigzaggoose/transitlateagain/internal/store"
 )
 
 // Result is what one rollup did.

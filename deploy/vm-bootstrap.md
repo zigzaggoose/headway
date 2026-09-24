@@ -4,12 +4,12 @@ The commands that built the production VM on 2026-09-24, in the order they ran.
 Rebuilding from scratch means running them again; nothing else was done by hand.
 
 **Server:** BinaryLane Standard, Sydney, 1 vCPU, 1 GB, 20 GB, Ubuntu 24.04 LTS,
-no backups. Hostname `headway`, IPv4 `119.42.55.16`.
+no backups. Hostname `transitlateagain`, IPv4 `119.42.55.16`.
 
 ## 1. SSH key (laptop)
 
 ```sh
-ssh-keygen -t ed25519 -C "headway-vm"
+ssh-keygen -t ed25519 -C "transitlateagain-vm"
 ssh-copy-id root@119.42.55.16        # the one use of the emailed root password
 ssh root@119.42.55.16 'echo ok'
 ```
@@ -21,7 +21,7 @@ value it reads and reads that directory in lexical order, so the override is
 `00-`, not a later number.
 
 ```sh
-cat > /etc/ssh/sshd_config.d/00-headway.conf <<'CONF'
+cat > /etc/ssh/sshd_config.d/00-transitlateagain.conf <<'CONF'
 PasswordAuthentication no
 KbdInteractiveAuthentication no
 PermitRootLogin prohibit-password
@@ -44,7 +44,7 @@ apt-get update && apt-get -y -o Dpkg::Options::=--force-confold upgrade
 # 2 GB swap (§16 q6): the Go build and a schedule load both spike memory.
 fallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile
 echo '/swapfile none swap sw 0 0' >> /etc/fstab
-echo 'vm.swappiness=10' > /etc/sysctl.d/99-headway.conf && sysctl -p /etc/sysctl.d/99-headway.conf
+echo 'vm.swappiness=10' > /etc/sysctl.d/99-transitlateagain.conf && sysctl -p /etc/sysctl.d/99-transitlateagain.conf
 
 ufw allow OpenSSH && ufw --force enable
 
@@ -71,7 +71,7 @@ purpose; Postgres is not published at all (`deploy/docker-compose.yml` has no
 ## 4. Repository and `.env`
 
 ```sh
-git clone https://github.com/zigzaggoose/headway.git /opt/headway
+git clone https://github.com/zigzaggoose/transitlateagain.git /opt/transitlateagain
 ```
 
 `.env` is written with `umask 077` (mode 0600). The API key is piped from the
@@ -79,9 +79,9 @@ laptop's `.env` so it never appears in a terminal or transcript:
 
 ```sh
 # laptop
-grep '^TFNSW_API_KEY=' .env | ssh root@119.42.55.16 'umask 077; cat > /opt/headway/.env'
+grep '^TFNSW_API_KEY=' .env | ssh root@119.42.55.16 'umask 077; cat > /opt/transitlateagain/.env'
 # VM
-cat >> /opt/headway/.env <<EOF
+cat >> /opt/transitlateagain/.env <<EOF
 POSTGRES_PASSWORD=$(openssl rand -hex 24)
 RETENTION_DAYS=7
 DB_MAX_CONNS=5
@@ -98,7 +98,7 @@ saturate it, and a person needs one or two a second.
 ## 5. Start
 
 ```sh
-cd /opt/headway
+cd /opt/transitlateagain
 docker compose --env-file .env -f deploy/docker-compose.yml up -d --build
 ```
 
@@ -109,22 +109,22 @@ docker compose --env-file .env -f deploy/docker-compose.yml up -d --build
 every boot after Docker:
 
 ```sh
-cat > /etc/systemd/system/headway-firewall.service <<'UNIT'
+cat > /etc/systemd/system/transitlateagain-firewall.service <<'UNIT'
 [Unit]
-Description=Headway per-IP limits on the API port
+Description=Transit Late Again per-IP limits on the API port
 Requires=docker.service
 After=docker.service
 
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-ExecStart=/bin/sh /opt/headway/deploy/firewall.sh
+ExecStart=/bin/sh /opt/transitlateagain/deploy/firewall.sh
 
 [Install]
 WantedBy=multi-user.target
 UNIT
-systemctl daemon-reload && systemctl enable --now headway-firewall
-iptables -L HEADWAY-LIMIT -v -n
+systemctl daemon-reload && systemctl enable --now transitlateagain-firewall
+iptables -L TRANSITLATEAGAIN-LIMIT -v -n
 ```
 
 Measured from a laptop on 2026-09-24: of 120 new connections opened 60 at a
@@ -135,7 +135,7 @@ limit and 5 dropped.
 ## Updating
 
 ```sh
-cd /opt/headway && git pull
+cd /opt/transitlateagain && git pull
 docker compose --env-file .env -f deploy/docker-compose.yml up -d --build
 ```
 

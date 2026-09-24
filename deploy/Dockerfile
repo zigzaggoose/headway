@@ -8,16 +8,16 @@ WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags="-s -w" -o /out/headway ./cmd/headway
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags="-s -w" -o /out/transitlateagain ./cmd/transitlateagain
 
 # No shell, no package manager, non-root. No zoneinfo either, which is why
 # main imports time/tzdata (§9.2).
 FROM gcr.io/distroless/static-debian12:nonroot@sha256:afa5c872c891853ca7fcf1f12c3edb23f7eeef36189728842dd51042ff57f7ab
-COPY --from=build /out/headway /headway
-# HEADWAY_FEEDS_FILE defaults to config/feeds.json relative to the working
+COPY --from=build /out/transitlateagain /transitlateagain
+# FEEDS_FILE defaults to config/feeds.json relative to the working
 # directory, so the catalogue sits at /config and the process runs from /.
 COPY config/feeds.json /config/feeds.json
 WORKDIR /
 USER nonroot:nonroot
 EXPOSE 8080
-ENTRYPOINT ["/headway"]
+ENTRYPOINT ["/transitlateagain"]

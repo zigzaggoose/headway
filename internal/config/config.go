@@ -36,13 +36,13 @@ func (s Secret) LogValue() slog.Value         { return slog.StringValue(Redacted
 // Reveal returns the underlying value. Call it only where the secret is used.
 func (s Secret) Reveal() string { return string(s) }
 
-// Config is the whole of Headway's configuration, grouped by the component
+// Config is the whole of Transit Late Again's configuration, grouped by the component
 // that consumes it.
 type Config struct {
 	APIKey      Secret // TFNSW_API_KEY
 	DatabaseURL Secret // DATABASE_URL, which carries a password
 
-	FeedsFile string // HEADWAY_FEEDS_FILE
+	FeedsFile string // FEEDS_FILE
 	Feeds     []Feed // the resolved set to poll, not the whole catalogue
 
 	Poll     PollConfig
@@ -93,8 +93,8 @@ type IngestConfig struct {
 	DelayReconcileToleranceS int           // DELAY_RECONCILE_TOLERANCE_S
 }
 
-// Thresholds is Headway's on-time classification, in seconds of delay. It is
-// Headway's own definition and not TfNSW's; see PROJECT.md §16 question 2.
+// Thresholds is Transit Late Again's on-time classification, in seconds of delay. It is
+// Transit Late Again's own definition and not TfNSW's; see PROJECT.md §16 question 2.
 // Changing any of these invalidates comparison with rollups already computed.
 type Thresholds struct {
 	EarlyS    int // ON_TIME_EARLY_S
@@ -147,7 +147,7 @@ func load(lookup func(string) (string, bool)) (*Config, error) {
 	cfg := &Config{
 		APIKey:      Secret(l.required("TFNSW_API_KEY")),
 		DatabaseURL: Secret(l.required("DATABASE_URL")),
-		FeedsFile:   l.str("HEADWAY_FEEDS_FILE", "config/feeds.json"),
+		FeedsFile:   l.str("FEEDS_FILE", "config/feeds.json"),
 
 		Poll: PollConfig{
 			Interval:    l.dur("FEED_POLL_INTERVAL", 15*time.Second),
@@ -216,7 +216,7 @@ func load(lookup func(string) (string, bool)) (*Config, error) {
 		if err != nil {
 			l.errs = append(l.errs, err)
 		} else {
-			feeds, err := SelectFeeds(all, l.list("HEADWAY_ENABLED_FEEDS"))
+			feeds, err := SelectFeeds(all, l.list("ENABLED_FEEDS"))
 			if err != nil {
 				l.errs = append(l.errs, err)
 			}

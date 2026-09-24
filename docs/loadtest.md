@@ -77,5 +77,5 @@ which does not change the conclusion at this margin.
 PPROF_ADDR=127.0.0.1:6060 HTTP_RATE_LIMIT_RPS=1000 make run
 hey -z 5m -c 10 -q 5 http://localhost:8080/v1/lines/APS_1a/now
 curl -o cpu.pprof "http://127.0.0.1:6060/debug/pprof/profile?seconds=30"   # during a run
-go tool pprof -top bin/headway cpu.pprof
+go tool pprof -top bin/transitlateagain cpu.pprof
 ```

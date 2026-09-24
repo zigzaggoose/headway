@@ -30,16 +30,16 @@ terminator line (`EOF`) ends early — pick a terminator the body cannot contain
 
 BinaryLane Standard 1 GB, Sydney, Ubuntu 24.04, no backups. Everything that was
 run is in `deploy/vm-bootstrap.md`; update with `git pull` and `docker compose
-... up -d --build` from `/opt/headway`.
+... up -d --build` from `/opt/transitlateagain`.
 
 - **SSH is key-only** (`~/.ssh/id_ed25519` on the laptop). The emailed root
   password works only in BinaryLane's web console.
-- **`/opt/headway/.env`** (0600): the API key, a generated `POSTGRES_PASSWORD`,
+- **`/opt/transitlateagain/.env`** (0600): the API key, a generated `POSTGRES_PASSWORD`,
   `RETENTION_DAYS=7`, `DB_MAX_CONNS=5`, `HTTP_RATE_LIMIT_RPS=10`.
 - **Admin stats are private**: `ADMIN_ADDR` is published on the host's
   127.0.0.1:8081 only; the public port answers `/v1/admin/stats` with 404.
 - **Per-IP connection limits** on 8080 in `DOCKER-USER` (`deploy/firewall.sh`,
-  `headway-firewall.service`, verified after a reboot). ufw governs SSH only —
+  `transitlateagain-firewall.service`, verified after a reboot). ufw governs SSH only —
   Docker's published ports bypass it.
 - Measured at first start: ready in under 80 s, 0 dropped, 0 failed,
   `default_partition_rows` 0; 236 MB service + 181 MB Postgres, ~220 MB free.
@@ -92,4 +92,4 @@ run is in `deploy/vm-bootstrap.md`; update with `git pull` and `docker compose
 - **The dev database's `public` schema has real data.** Catalogue tests scope to
   their own schema; load tests go in a throwaway database.
 - **The API key was pasted into an early session transcript**; worth rotating if
-  that transcript is shared. Rotating means editing `/opt/headway/.env` too.
+  that transcript is shared. Rotating means editing `/opt/transitlateagain/.env` too.

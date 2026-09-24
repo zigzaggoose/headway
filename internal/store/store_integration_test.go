@@ -16,8 +16,8 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/zigzaggoose/headway"
-	"github.com/zigzaggoose/headway/internal/config"
+	"github.com/zigzaggoose/transitlateagain"
+	"github.com/zigzaggoose/transitlateagain/internal/config"
 )
 
 // Integration tests run against a real Postgres, not a mock: mocking would not
@@ -64,7 +64,7 @@ func testStore(t *testing.T) *Store {
 
 func embedded(t *testing.T) fs.FS {
 	t.Helper()
-	sub, err := fs.Sub(headway.Migrations, "migrations")
+	sub, err := fs.Sub(transitlateagain.Migrations, "migrations")
 	if err != nil {
 		t.Fatalf("sub: %v", err)
 	}

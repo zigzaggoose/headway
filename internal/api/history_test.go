@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zigzaggoose/headway/internal/cache"
-	"github.com/zigzaggoose/headway/internal/store"
+	"github.com/zigzaggoose/transitlateagain/internal/cache"
+	"github.com/zigzaggoose/transitlateagain/internal/store"
 )
 
 var aest = time.FixedZone("AEST", 10*3600)

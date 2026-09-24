@@ -12,14 +12,14 @@ import (
 
 	"github.com/jackc/pgx/v5/pgconn"
 
-	"github.com/zigzaggoose/headway"
-	"github.com/zigzaggoose/headway/internal/config"
+	"github.com/zigzaggoose/transitlateagain"
+	"github.com/zigzaggoose/transitlateagain/internal/config"
 )
 
 // The migrations that ship in the binary must satisfy the loader's own rules:
 // unique ascending versions, NNNN_name.sql, non-empty.
 func TestLoad_EmbeddedMigrations_AreWellFormed(t *testing.T) {
-	sub, err := fs.Sub(headway.Migrations, "migrations")
+	sub, err := fs.Sub(transitlateagain.Migrations, "migrations")
 	if err != nil {
 		t.Fatalf("sub: %v", err)
 	}

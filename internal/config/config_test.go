@@ -25,9 +25,9 @@ func baseEnv(t *testing.T) map[string]string {
 		t.Fatalf("write catalogue: %v", err)
 	}
 	return map[string]string{
-		"TFNSW_API_KEY":      "test-key",
-		"DATABASE_URL":       "postgres://headway:hunter2@localhost:5432/headway?sslmode=disable",
-		"HEADWAY_FEEDS_FILE": path,
+		"TFNSW_API_KEY": "test-key",
+		"DATABASE_URL":  "postgres://headway:hunter2@localhost:5432/headway?sslmode=disable",
+		"FEEDS_FILE":    path,
 	}
 }
 
@@ -92,7 +92,7 @@ func TestLoad_MinimalEnvironment_AppliesDocumentedDefaults(t *testing.T) {
 		{"LOG_FORMAT", cfg.Log.Format, "json"},
 		{"METRICS_ENABLED", cfg.Log.MetricsEnabled, true},
 		{"TZ", cfg.Log.TZ, "Australia/Sydney"},
-		{"HEADWAY_ENABLED_FEEDS resolves to the enabled feeds", len(cfg.Feeds), 1},
+		{"ENABLED_FEEDS resolves to the enabled feeds", len(cfg.Feeds), 1},
 	}
 	for _, c := range checks {
 		if c.got != c.want {

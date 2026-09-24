@@ -8,9 +8,9 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/zigzaggoose/headway/internal/cache"
-	"github.com/zigzaggoose/headway/internal/match"
-	"github.com/zigzaggoose/headway/internal/servicetime"
+	"github.com/zigzaggoose/transitlateagain/internal/cache"
+	"github.com/zigzaggoose/transitlateagain/internal/match"
+	"github.com/zigzaggoose/transitlateagain/internal/servicetime"
 )
 
 // tripRelCanceled is TripDescriptor.CANCELED. Kept as a raw int32 like every

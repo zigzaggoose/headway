@@ -9,7 +9,7 @@ import (
 	"runtime/debug"
 	"time"
 
-	"github.com/zigzaggoose/headway/internal/config"
+	"github.com/zigzaggoose/transitlateagain/internal/config"
 )
 
 // Handler receives one fetched body. It is called on the poller's own

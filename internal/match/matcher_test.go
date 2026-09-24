@@ -8,9 +8,9 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/zigzaggoose/headway/internal/gtfsrt"
-	"github.com/zigzaggoose/headway/internal/ingest"
-	"github.com/zigzaggoose/headway/internal/servicetime"
+	"github.com/zigzaggoose/transitlateagain/internal/gtfsrt"
+	"github.com/zigzaggoose/transitlateagain/internal/ingest"
+	"github.com/zigzaggoose/transitlateagain/internal/servicetime"
 )
 
 const feedID = "sydneytrains"

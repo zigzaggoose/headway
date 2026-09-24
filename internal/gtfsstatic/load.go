@@ -17,8 +17,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/zigzaggoose/headway/internal/config"
-	"github.com/zigzaggoose/headway/internal/feed"
+	"github.com/zigzaggoose/transitlateagain/internal/config"
+	"github.com/zigzaggoose/transitlateagain/internal/feed"
 )
 
 // Loader downloads and loads schedule bundles. Load is not safe to call

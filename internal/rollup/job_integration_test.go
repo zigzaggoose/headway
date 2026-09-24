@@ -15,9 +15,9 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/zigzaggoose/headway"
-	"github.com/zigzaggoose/headway/internal/config"
-	"github.com/zigzaggoose/headway/internal/store"
+	"github.com/zigzaggoose/transitlateagain"
+	"github.com/zigzaggoose/transitlateagain/internal/config"
+	"github.com/zigzaggoose/transitlateagain/internal/store"
 )
 
 func testPool(t *testing.T) *pgxpool.Pool {
@@ -48,7 +48,7 @@ func testPool(t *testing.T) *pgxpool.Pool {
 		t.Fatalf("open: %v", err)
 	}
 	t.Cleanup(s.Close)
-	sub, err := fs.Sub(headway.Migrations, "migrations")
+	sub, err := fs.Sub(transitlateagain.Migrations, "migrations")
 	if err != nil {
 		t.Fatalf("sub: %v", err)
 	}

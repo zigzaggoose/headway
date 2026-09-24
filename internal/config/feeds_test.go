@@ -159,11 +159,11 @@ func ids(feeds []Feed) []string {
 	return out
 }
 
-// HEADWAY_ENABLED_FEEDS is resolved during Load, so a typo there must fail
+// ENABLED_FEEDS is resolved during Load, so a typo there must fail
 // startup rather than quietly reduce the feed set.
 func TestLoad_EnabledFeedsTypo_FailsStartup(t *testing.T) {
 	env := baseEnv(t)
-	env["HEADWAY_ENABLED_FEEDS"] = "sydneytrains, ferrys"
+	env["ENABLED_FEEDS"] = "sydneytrains, ferrys"
 	_, err := loadWith(t, env)
 	if err == nil {
 		t.Fatal("load accepted an unknown feed id")
@@ -175,7 +175,7 @@ func TestLoad_EnabledFeedsTypo_FailsStartup(t *testing.T) {
 
 func TestLoad_EnabledFeeds_SelectsNamedFeedsInOrder(t *testing.T) {
 	env := baseEnv(t)
-	env["HEADWAY_ENABLED_FEEDS"] = "ferries,sydneytrains"
+	env["ENABLED_FEEDS"] = "ferries,sydneytrains"
 	cfg, err := loadWith(t, env)
 	if err != nil {
 		t.Fatalf("load: %v", err)

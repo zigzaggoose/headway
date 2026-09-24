@@ -16,10 +16,10 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/zigzaggoose/headway"
-	"github.com/zigzaggoose/headway/internal/config"
-	"github.com/zigzaggoose/headway/internal/gtfsrt"
-	"github.com/zigzaggoose/headway/internal/store"
+	"github.com/zigzaggoose/transitlateagain"
+	"github.com/zigzaggoose/transitlateagain/internal/config"
+	"github.com/zigzaggoose/transitlateagain/internal/gtfsrt"
+	"github.com/zigzaggoose/transitlateagain/internal/store"
 )
 
 // testPool gives each test its own schema with every migration applied, so the
@@ -56,7 +56,7 @@ func testPool(t *testing.T) *pgxpool.Pool {
 	}
 	t.Cleanup(s.Close)
 
-	sub, err := fs.Sub(headway.Migrations, "migrations")
+	sub, err := fs.Sub(transitlateagain.Migrations, "migrations")
 	if err != nil {
 		t.Fatalf("sub: %v", err)
 	}

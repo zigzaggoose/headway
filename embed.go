@@ -1,8 +1,8 @@
-// Package headway carries the assets the binary has to ship with. It holds no
+// Package transitlateagain carries the assets the binary has to ship with. It holds no
 // logic: it exists because //go:embed cannot reach outside its own directory,
 // and PROJECT.md §5 puts migrations/ at the repository root where a reader
 // looks for them rather than buried inside a package.
-package headway
+package transitlateagain
 
 import "embed"
 

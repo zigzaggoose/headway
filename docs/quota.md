@@ -1,7 +1,7 @@
 # Quota budget
 
 TfNSW's default plan allows 60,000 requests a day and 5 a second, per account
-(`PROJECT.md` §16 q1). Headway stops itself at `FEED_DAILY_BUDGET` (55,000) and
+(`PROJECT.md` §16 q1). Transit Late Again stops itself at `FEED_DAILY_BUDGET` (55,000) and
 rate-limits at `FEED_RATE_LIMIT_RPS` (4), leaving headroom for `curl` by hand.
 
 ## Enabled set, 2026-09-23

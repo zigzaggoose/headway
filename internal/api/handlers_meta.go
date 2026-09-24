@@ -8,7 +8,7 @@ import (
 	"slices"
 	"time"
 
-	"github.com/zigzaggoose/headway/internal/match"
+	"github.com/zigzaggoose/transitlateagain/internal/match"
 )
 
 // healthz is liveness only. It checks nothing, because a Postgres outage

@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zigzaggoose/headway/internal/config"
+	"github.com/zigzaggoose/transitlateagain/internal/config"
 )
 
 // Response is one fetched body. FetchedAt is our clock; the feed's own
@@ -85,7 +85,7 @@ func NewClient(key config.Secret, timeout time.Duration, now func() time.Time) *
 	return &Client{
 		http:      &http.Client{Timeout: timeout},
 		key:       key,
-		userAgent: "headway/0.1 (+https://github.com/zigzaggoose/headway)",
+		userAgent: "transitlateagain/0.1 (+https://github.com/zigzaggoose/transitlateagain)",
 		now:       now,
 	}
 }

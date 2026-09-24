@@ -101,7 +101,7 @@ func checkFeedURL(where, field, raw string) error {
 	return nil
 }
 
-// SelectFeeds resolves which feeds to poll. HEADWAY_ENABLED_FEEDS, when set,
+// SelectFeeds resolves which feeds to poll. ENABLED_FEEDS, when set,
 // replaces the catalogue's "enabled" flags entirely, so an operator can turn a
 // feed on for one deployment without editing a committed file. When it is
 // unset, every feed marked enabled in the catalogue is polled.
@@ -118,7 +118,7 @@ func SelectFeeds(all []Feed, enabled []string) ([]Feed, error) {
 			}
 		}
 		if len(out) == 0 {
-			return nil, errors.New("no feed in the catalogue is enabled and HEADWAY_ENABLED_FEEDS is empty")
+			return nil, errors.New("no feed in the catalogue is enabled and ENABLED_FEEDS is empty")
 		}
 		return out, nil
 	}
@@ -128,11 +128,11 @@ func SelectFeeds(all []Feed, enabled []string) ([]Feed, error) {
 	for _, id := range enabled {
 		i := slices.IndexFunc(all, func(f Feed) bool { return f.ID == id })
 		if i < 0 {
-			errs = append(errs, fmt.Errorf("HEADWAY_ENABLED_FEEDS names %q, which is not in the feed catalogue", id))
+			errs = append(errs, fmt.Errorf("ENABLED_FEEDS names %q, which is not in the feed catalogue", id))
 			continue
 		}
 		if slices.ContainsFunc(out, func(f Feed) bool { return f.ID == id }) {
-			errs = append(errs, fmt.Errorf("HEADWAY_ENABLED_FEEDS names %q twice", id))
+			errs = append(errs, fmt.Errorf("ENABLED_FEEDS names %q twice", id))
 			continue
 		}
 		out = append(out, all[i])

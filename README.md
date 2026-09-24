@@ -1,13 +1,13 @@
-# Headway
+# Transit Late Again
 
-On-time performance for the Sydney transport network. Headway polls the
+On-time performance for the Sydney transport network. Transit Late Again polls the
 Transport for NSW GTFS-realtime feeds, matches every stop-time update against
 the published timetable, and stores the delay it observes, so it can answer two
 questions: what is happening on this line right now, and how has this stop or
 line performed over the last N days.
 
 TfNSW publishes realtime data and timetable data but not on-time performance,
-and the realtime feed is not archived anywhere queryable. Headway captures it.
+and the realtime feed is not archived anywhere queryable. Transit Late Again captures it.
 
 `PROJECT.md` is the design document and the source of truth for this repository.
 

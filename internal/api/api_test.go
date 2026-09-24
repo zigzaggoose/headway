@@ -12,10 +12,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zigzaggoose/headway/internal/cache"
-	"github.com/zigzaggoose/headway/internal/config"
-	"github.com/zigzaggoose/headway/internal/ingest"
-	"github.com/zigzaggoose/headway/internal/match"
+	"github.com/zigzaggoose/transitlateagain/internal/cache"
+	"github.com/zigzaggoose/transitlateagain/internal/config"
+	"github.com/zigzaggoose/transitlateagain/internal/ingest"
+	"github.com/zigzaggoose/transitlateagain/internal/match"
 )
 
 // fixtureSchedule is feed "trains": routes R1 (T1) and R2 (T2), stops s1 to

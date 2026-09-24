@@ -14,7 +14,7 @@ import (
 // Pipeline is the change filter, the bounded channel and the writer, wired
 // together with the shutdown ordering §9.4 requires.
 //
-// The channel is the only backpressure point in Headway, and it drops rather
+// The channel is the only backpressure point in Transit Late Again, and it drops rather
 // than blocks: blocking would back-pressure into the poller, which would miss
 // polls and lose data permanently, whereas a dropped observation is re-sent
 // fifteen seconds later.

@@ -7,13 +7,13 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/zigzaggoose/headway/internal/gtfsrt"
-	"github.com/zigzaggoose/headway/internal/ingest"
-	"github.com/zigzaggoose/headway/internal/servicetime"
+	"github.com/zigzaggoose/transitlateagain/internal/gtfsrt"
+	"github.com/zigzaggoose/transitlateagain/internal/ingest"
+	"github.com/zigzaggoose/transitlateagain/internal/servicetime"
 )
 
 // Counts says what happened to one poll's updates. The unmatched reasons are
-// the labels of headway_unmatched_total (§9.1).
+// the labels of transitlateagain_unmatched_total (§9.1).
 type Counts struct {
 	Updates      int // stop-level and trip-level updates offered
 	Observations int // observations returned, including synthesised ones

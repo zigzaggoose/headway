@@ -17,7 +17,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// migrationLockID is an arbitrary constant that two Headway processes agree
+// migrationLockID is an arbitrary constant that two Transit Late Again processes agree
 // on. It is not distributed locking in the sense §2 rejects — nothing
 // coordinates ingestion — it just stops `make migrate` and a starting
 // container from running the same DDL at the same instant.

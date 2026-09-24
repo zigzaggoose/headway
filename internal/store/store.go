@@ -1,4 +1,4 @@
-// Package store owns every SQL statement Headway runs. Queries are written by
+// Package store owns every SQL statement Transit Late Again runs. Queries are written by
 // hand: the interesting parts of this design are partition pruning, ON CONFLICT
 // behaviour and a COPY-based batch write, all of which an ORM hides. §15.
 package store
@@ -15,10 +15,10 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/zigzaggoose/headway/internal/config"
+	"github.com/zigzaggoose/transitlateagain/internal/config"
 )
 
-// Store is a pgx pool with Headway's statements hung off it.
+// Store is a pgx pool with Transit Late Again's statements hung off it.
 type Store struct {
 	pool *pgxpool.Pool
 	log  *slog.Logger

@@ -11,14 +11,14 @@ Log. This file is the subset you need *every* session. Section references like
 
 ## What this is
 
-**Headway** polls the Transport for NSW GTFS-realtime feeds every 15 s, decodes the
+**Transit Late Again** polls the Transport for NSW GTFS-realtime feeds every 15 s, decodes the
 protobuf, matches each stop-time update against the published timetable, and stores
 the resulting delay observations in PostgreSQL. It answers two questions over HTTP:
 what is happening on this line right now, and how has this stop or line performed
 over the last N days. TfNSW publishes realtime data and timetable data but not
-on-time performance, and does not archive the realtime feed — Headway captures it.
+on-time performance, and does not archive the realtime feed — Transit Late Again captures it.
 
-One process, one database, one VM. Everything runs in `cmd/headway`:
+One process, one database, one VM. Everything runs in `cmd/transitlateagain`:
 
 ```
 poller (1/feed) → decoder → matcher → change filter → bounded chan → batch writer → Postgres
@@ -77,16 +77,16 @@ There is no typechecker step beyond `go build` and `go vet`.
 ## Where code goes
 
 ```
-cmd/headway/      wiring only: config → components → signals. No logic.
-cmd/fixturedump/  records testdata fixtures. The only thing that calls the live API.
-embed.go          //go:embed migrations/*.sql. No logic.
-internal/config/  env → validated Config. Fails fast. Never read after startup.
-internal/feed/    HTTP client, token-bucket limiter, one poller per feed.
-internal/gtfsrt/  protobuf → RawUpdate. EVERY nil check in the codebase lives here.
-internal/ingest/  Observation, change filter, bounded channel, batch writer.
-internal/store/   pool, migrations, hand-written SQL. No ORM.
-migrations/       NNNN_name.sql, applied in order, checksummed.
-testdata/         recorded .pb fixtures. Tests never call the live API.
+cmd/transitlateagain/  wiring only: config → components → signals. No logic.
+cmd/fixturedump/       records testdata fixtures. The only thing that calls the live API.
+embed.go               //go:embed migrations/*.sql. No logic.
+internal/config/       env → validated Config. Fails fast. Never read after startup.
+internal/feed/         HTTP client, token-bucket limiter, one poller per feed.
+internal/gtfsrt/       protobuf → RawUpdate. EVERY nil check in the codebase lives here.
+internal/ingest/       Observation, change filter, bounded channel, batch writer.
+internal/store/        pool, migrations, hand-written SQL. No ORM.
+migrations/            NNNN_name.sql, applied in order, checksummed.
+testdata/              recorded .pb fixtures. Tests never call the live API.
 ```
 
 Not yet built: `internal/obs`, `web/`. §5 is the destination layout. Create a package

@@ -13,16 +13,16 @@ help:
 	@grep -hE '^[a-z-]+:.*?##' $(MAKEFILE_LIST) | awk -F':.*?## ' '{printf "  %-18s %s\n", $$1, $$2}'
 
 run: ## Run the service against the local database. Reads .env if present.
-	@$(LOADENV) $(GO) run ./cmd/headway
+	@$(LOADENV) $(GO) run ./cmd/transitlateagain
 
 build: ## Build for this machine.
-	$(GO) build -o bin/headway ./cmd/headway
+	$(GO) build -o bin/transitlateagain ./cmd/transitlateagain
 
 migrate: ## Apply migrations and exit. The service also migrates on startup.
-	@$(LOADENV) $(GO) run ./cmd/headway -migrate-only
+	@$(LOADENV) $(GO) run ./cmd/transitlateagain -migrate-only
 
 maintain: ## One maintenance tick (partitions, rollup, retention), then exit.
-	@$(LOADENV) $(GO) run ./cmd/headway -maintain-once
+	@$(LOADENV) $(GO) run ./cmd/transitlateagain -maintain-once
 
 test: ## Unit tests, race detector on, no cache.
 	$(GO) test -race -count=1 ./...
@@ -50,7 +50,7 @@ vet:
 	$(GO) vet ./...
 
 cross: ## The deployment build. Catches the amd64 mistake CI checks for.
-	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 $(GO) build -o /dev/null ./cmd/headway
+	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 $(GO) build -o /dev/null ./cmd/transitlateagain
 
 fixtures: ## Capture a live feed response into testdata/. Needs TFNSW_API_KEY.
 	@$(LOADENV) $(GO) run ./cmd/fixturedump
@@ -65,7 +65,7 @@ down:
 	$(COMPOSE) down
 
 logs:
-	$(COMPOSE) logs -f headway
+	$(COMPOSE) logs -f transitlateagain
 
 tidy:
 	$(GO) mod tidy

@@ -10,7 +10,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/zigzaggoose/headway/internal/servicetime"
+	"github.com/zigzaggoose/transitlateagain/internal/servicetime"
 )
 
 // table describes one GTFS file and the table it loads into. convert turns a
@@ -114,7 +114,7 @@ func (r row) stopTime(col string, maxS int) (*int, error) {
 	return &n, nil
 }
 
-// tables lists what Headway loads. The timetable tables reference only
+// tables lists what Transit Late Again loads. The timetable tables reference only
 // schedule_versions, not each other, so their order does not matter.
 // Everything else in the bundle (shapes, occupancies, TfNSW's vehicle files)
 // is skipped: occupancies alone is 48 MB of data nothing here reads.

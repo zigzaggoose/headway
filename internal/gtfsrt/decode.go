@@ -50,7 +50,7 @@ func Decode(feedID string, body []byte, fetchedAt time.Time) (DecodedFeed, error
 	for _, entity := range msg.GetEntity() {
 		tu := entity.GetTripUpdate()
 		if tu == nil {
-			// Vehicle positions and alerts. Expected: Headway ingests trip
+			// Vehicle positions and alerts. Expected: Transit Late Again ingests trip
 			// updates only, and the feed may carry others.
 			out.Dropped[DropNotTripUpdate]++
 			continue

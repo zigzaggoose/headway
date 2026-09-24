@@ -8,7 +8,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/zigzaggoose/headway/internal/match"
+	"github.com/zigzaggoose/transitlateagain/internal/match"
 )
 
 // ErrNoActiveSchedule means the feed has no active schedule version yet.

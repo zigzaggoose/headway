@@ -20,11 +20,11 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/zigzaggoose/headway"
-	"github.com/zigzaggoose/headway/internal/config"
-	"github.com/zigzaggoose/headway/internal/feed"
-	"github.com/zigzaggoose/headway/internal/match"
-	"github.com/zigzaggoose/headway/internal/store"
+	"github.com/zigzaggoose/transitlateagain"
+	"github.com/zigzaggoose/transitlateagain/internal/config"
+	"github.com/zigzaggoose/transitlateagain/internal/feed"
+	"github.com/zigzaggoose/transitlateagain/internal/match"
+	"github.com/zigzaggoose/transitlateagain/internal/store"
 )
 
 func testPool(t *testing.T) *pgxpool.Pool {
@@ -57,7 +57,7 @@ func testPool(t *testing.T) *pgxpool.Pool {
 		t.Fatalf("open: %v", err)
 	}
 	t.Cleanup(s.Close)
-	sub, err := fs.Sub(headway.Migrations, "migrations")
+	sub, err := fs.Sub(transitlateagain.Migrations, "migrations")
 	if err != nil {
 		t.Fatalf("sub: %v", err)
 	}
@@ -372,12 +372,12 @@ func TestSchema_SecondActiveVersion_IsRejectedByTheIndex(t *testing.T) {
 	}
 }
 
-// The real bundle is 10.7 MB and not committed. Point HEADWAY_TEST_BUNDLE at
+// The real bundle is 10.7 MB and not committed. Point GTFS_TEST_BUNDLE at
 // a downloaded copy to measure a full load.
 func TestLoad_RealBundle(t *testing.T) {
-	path := os.Getenv("HEADWAY_TEST_BUNDLE")
+	path := os.Getenv("GTFS_TEST_BUNDLE")
 	if path == "" {
-		t.Skip("HEADWAY_TEST_BUNDLE is not set")
+		t.Skip("GTFS_TEST_BUNDLE is not set")
 	}
 	body, err := os.ReadFile(path)
 	if err != nil {

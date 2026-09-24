@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zigzaggoose/headway/internal/ingest"
+	"github.com/zigzaggoose/transitlateagain/internal/ingest"
 )
 
 var (

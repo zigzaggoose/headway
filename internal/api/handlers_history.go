@@ -8,8 +8,8 @@ import (
 	"slices"
 	"time"
 
-	"github.com/zigzaggoose/headway/internal/servicetime"
-	"github.com/zigzaggoose/headway/internal/store"
+	"github.com/zigzaggoose/transitlateagain/internal/servicetime"
+	"github.com/zigzaggoose/transitlateagain/internal/store"
 )
 
 // handlerTimeout is §10.1's budget for an API handler that reads Postgres.

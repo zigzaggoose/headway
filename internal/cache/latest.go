@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/zigzaggoose/headway/internal/ingest"
+	"github.com/zigzaggoose/transitlateagain/internal/ingest"
 )
 
 // Trip is one active trip as of its feed's latest poll. NextStopID and DelayS
