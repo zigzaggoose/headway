@@ -10,9 +10,8 @@ import (
 )
 
 // Trip is one active trip as of its feed's latest poll. NextStopID and DelayS
-// describe the first stop the producer still reports for it, which is the
-// next one: producers list stop-time updates in trip order and drop the
-// stops already served.
+// describe the first stop the producer reports for it that has not been
+// served (see Update).
 type Trip struct {
 	FeedID      string
 	TripID      string
@@ -28,8 +27,7 @@ type Trip struct {
 	LastUpdate  time.Time
 }
 
-// Call is one trip's reported call at one stop: every stop the producer still
-// lists for a trip is one it has not yet served.
+// Call is one trip's reported call at one stop that has not been served.
 type Call struct {
 	FeedID      string
 	TripID      string
@@ -70,14 +68,29 @@ func New(ttl time.Duration, now func() time.Time) *Cache {
 	return &Cache{ttl: ttl, now: now, feeds: make(map[string]*snapshot)}
 }
 
+// servedAfter is how far behind the feed's own timestamp a stop's predicted
+// time must fall before the stop counts as served. The TfNSW producers keep
+// finished trips, and some keep a trip's served stops ahead of the next one
+// (§9.1 case 18); a live prediction is re-estimated every poll, so one ten
+// minutes stale has stopped being a prediction.
+const servedAfter = 10 * time.Minute
+
 // Update replaces feedID's trips with those in obs, one poll's worth. The
 // snapshot is built before the lock is taken, so readers wait only for a
 // map assignment.
+//
+// Served stops are dropped, so a trip's next stop is its first unserved one
+// and a trip with none left is not active. The reference is feedTS, never
+// our clock, so a replay builds the same snapshot. An unmatched observation
+// has no scheduled time to judge by and is kept.
 func (c *Cache) Update(feedID string, feedTS time.Time, obs []ingest.Observation) {
 	s := &snapshot{feedTS: feedTS, byRoute: make(map[string][]Trip), byStop: make(map[string][]Call)}
 	type tripKey struct{ serviceDate, tripID string }
 	seen := make(map[tripKey]bool)
 	for _, o := range obs {
+		if served(o, feedTS) {
+			continue
+		}
 		s.byStop[o.StopID] = append(s.byStop[o.StopID], Call{
 			FeedID:      o.FeedID,
 			TripID:      o.TripID,
@@ -89,8 +102,8 @@ func (c *Cache) Update(feedID string, feedTS time.Time, obs []ingest.Observation
 			TripRel:     o.TripRel,
 			Matched:     o.Matched,
 		})
-		// The first observation of a trip is its next stop; the rest are
-		// further down the line.
+		// The first unserved observation of a trip is its next stop; the
+		// rest are further down the line.
 		k := tripKey{o.ServiceDate.Format(time.DateOnly), o.TripID}
 		if seen[k] {
 			continue
@@ -115,6 +128,17 @@ func (c *Cache) Update(feedID string, feedTS time.Time, obs []ingest.Observation
 	c.mu.Lock()
 	c.feeds[feedID] = s
 	c.mu.Unlock()
+}
+
+func served(o ingest.Observation, feedTS time.Time) bool {
+	if o.ScheduledAt == nil {
+		return false
+	}
+	at := *o.ScheduledAt
+	if o.ObservedDelayS != nil {
+		at = at.Add(time.Duration(*o.ObservedDelayS) * time.Second)
+	}
+	return feedTS.Sub(at) > servedAfter
 }
 
 // Route returns the active trips on routeID across every feed that is still

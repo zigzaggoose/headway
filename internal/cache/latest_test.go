@@ -186,6 +186,66 @@ func TestNewest_AcrossFeeds_IsTheLatestFeedTimestamp(t *testing.T) {
 	}
 }
 
+// §9.1 case 18: the producers keep finished trips, and served stops ahead of
+// the next one.
+func TestUpdate_ServedStops_AreNotNextStopsOrCalls(t *testing.T) {
+	at := func(tripID, stopID string, scheduled time.Duration, delay int32) ingest.Observation {
+		o := obs("trains", "R1", tripID, stopID, delay, t0)
+		o.ScheduledAt = ptr(t0.Add(scheduled))
+		return o
+	}
+	unmatched := obs("trains", "R1", "trip-u", "stop-1", 0, t0)
+	unmatched.ObservedDelayS = nil
+	c := New(45*time.Minute, fixedClock(t0))
+	c.Update("trains", t0, []ingest.Observation{
+		at("trip-a", "stop-1", -40*time.Minute, 0),
+		at("trip-a", "stop-2", -20*time.Minute, 0),
+		at("trip-a", "stop-3", 5*time.Minute, 0),
+		at("trip-done", "stop-3", -3*time.Hour, 0),
+		at("trip-late", "stop-2", -30*time.Minute, 25*60),
+		at("trip-edge", "stop-2", -10*time.Minute, 0),
+		unmatched,
+	})
+
+	trips, _, _ := c.Route("R1")
+	next := map[string]string{}
+	for _, tr := range trips {
+		next[tr.TripID] = tr.NextStopID
+	}
+
+	t.Run("a trip whose served stops are still listed is at its first unserved stop", func(t *testing.T) {
+		if next["trip-a"] != "stop-3" {
+			t.Errorf("next stop = %q, want stop-3", next["trip-a"])
+		}
+	})
+	t.Run("a trip with every stop served is not active", func(t *testing.T) {
+		if _, ok := next["trip-done"]; ok {
+			t.Error("trip-done is listed")
+		}
+	})
+	t.Run("a late trip is judged by its predicted time, not its scheduled one", func(t *testing.T) {
+		if next["trip-late"] != "stop-2" {
+			t.Errorf("next stop = %q, want stop-2: 30 min late on the timetable, 25 min of delay", next["trip-late"])
+		}
+	})
+	t.Run("a stop exactly ten minutes behind is not yet served", func(t *testing.T) {
+		if next["trip-edge"] != "stop-2" {
+			t.Errorf("next stop = %q, want stop-2", next["trip-edge"])
+		}
+	})
+	t.Run("an unmatched trip has no time to judge by and is kept", func(t *testing.T) {
+		if next["trip-u"] != "stop-1" {
+			t.Errorf("next stop = %q, want stop-1", next["trip-u"])
+		}
+	})
+	t.Run("a served call is not listed at its stop", func(t *testing.T) {
+		calls, _, _ := c.Stop("stop-3")
+		if len(calls) != 1 || calls[0].TripID != "trip-a" {
+			t.Errorf("calls at stop-3 = %+v, want trip-a only", calls)
+		}
+	})
+}
+
 func TestStop_AfterUpdate_ReturnsEveryCallAtTheStop(t *testing.T) {
 	c := New(45*time.Minute, fixedClock(t0))
 	c.Update("trains", t0, []ingest.Observation{

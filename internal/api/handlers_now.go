@@ -363,8 +363,8 @@ func (s *server) stopNow(w http.ResponseWriter, r *http.Request) {
 	for _, c := range calls {
 		headsign, scheduled := t.call(c.FeedID, c.TripID, c.StopSeq, c.ServiceDate)
 		// An unmatched call has no scheduled time, so it cannot be placed in
-		// the window. Every call the feed still reports is one not yet
-		// served, so there is no lower bound: a late train stays listed.
+		// the window. The cache has already dropped served calls (§9.1 case
+		// 18), so there is no lower bound here: a late train stays listed.
 		if scheduled == nil {
 			continue
 		}
