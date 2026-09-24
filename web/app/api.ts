@@ -13,11 +13,17 @@ export type Line = {
   feed_id: string;
 };
 
-export type Status = "early" | "on_time" | "late" | "very_late" | "cancelled" | "unknown";
+export type Status = "early" | "on_time" | "late" | "very_late" | "cancelled" | "skipped" | "unknown";
+
+// A trip's first or last stop, as the timetable has it; null when unmatched.
+export type TripEnd = { stop_id: string; name?: string; scheduled: string | null } | null;
 
 export type Trip = {
   trip_id: string;
+  service_date: string;
   headsign?: string;
+  start: TripEnd;
+  end: TripEnd;
   matched: boolean;
   next_stop: {
     stop_id: string;
@@ -42,6 +48,20 @@ export type Now = {
     median_delay_s: number | null;
   };
   trips: Trip[];
+};
+
+export type TripDetail = {
+  trip_id: string;
+  stops: {
+    stop_id: string;
+    name?: string;
+    stop_sequence: number;
+    scheduled: string | null;
+    predicted: string | null;
+    delay_s: number | null;
+    status: Status;
+    passed: boolean;
+  }[];
 };
 
 export type Bucket = {

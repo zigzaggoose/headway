@@ -133,6 +133,59 @@ th {
 .late { color: var(--fair); }
 .very_late,
 .cancelled { color: var(--poor); }
+.skipped { color: var(--muted); }
+
+.trips {
+  border-top: 1px solid var(--line);
+}
+
+.trip {
+  border-bottom: 1px solid var(--line);
+}
+
+.trip summary {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 2px 16px;
+  padding: 10px 0;
+  cursor: pointer;
+}
+
+/* The disclosure marker, drawn inline so it sits before the journey. */
+.trip summary::before {
+  content: "▸";
+  color: var(--muted);
+  margin-right: -8px;
+}
+
+.trip[open] summary::before {
+  content: "▾";
+}
+
+.trip summary::-webkit-details-marker {
+  display: none;
+}
+
+.trip .journey {
+  flex: 1;
+}
+
+.trip table {
+  margin: 0 0 12px 18px;
+  width: calc(100% - 18px);
+}
+
+.trip tr.upcoming td {
+  color: var(--muted);
+}
+
+/* Status colours outrank .upcoming's muting: a predicted late stop still reads late. */
+.trip tr.upcoming td.on_time { color: var(--good); }
+.trip tr.upcoming td.early,
+.trip tr.upcoming td.late { color: var(--fair); }
+.trip tr.upcoming td.very_late,
+.trip tr.upcoming td.cancelled { color: var(--poor); }
 
 button.link {
   padding: 0;

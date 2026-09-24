@@ -1,29 +1,13 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { API, get, type History, type Line, type Now, type Status } from "./api";
+import { API, get, type History, type Line, type Now } from "./api";
 import { StatusPie } from "./chart";
 import { mergeNow, name, reverseOf, samePattern, tally as sum, type Tally } from "./lines";
+import { TripRow } from "./trip";
 
 // route_type, as TfNSW's bundles use it, to the name a rider would pick from.
 const MODES: Record<number, string> = { 2: "Trains", 401: "Metro", 1: "Metro", 4: "Ferries", 900: "Light rail", 0: "Light rail" };
-
-const STATUS: Record<Status, string> = {
-  early: "Early",
-  on_time: "On time",
-  late: "Late",
-  very_late: "Very late",
-  cancelled: "Cancelled",
-  unknown: "Unknown",
-};
-
-function delay(s: number | null): string {
-  if (s === null) return "—";
-  if (s === 0) return "0 s";
-  const sign = s < 0 ? "−" : "+";
-  const a = Math.abs(s);
-  return a < 60 ? `${sign}${a} s` : `${sign}${Math.floor(a / 60)} min ${a % 60} s`;
-}
 
 const RANGES = { hour: 48 * 3600e3, day: 14 * 86400e3 } as const;
 
@@ -197,34 +181,14 @@ export default function Page() {
           {now.trips.length === 0 ? (
             <p className="muted">Nothing running on this line right now.</p>
           ) : (
-            <table>
-              <thead>
-                <tr>
-                  <th scope="col">To</th>
-                  <th scope="col">Next stop</th>
-                  <th scope="col">Delay</th>
-                  <th scope="col">Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {now.trips.map((t) => (
-                  <tr key={t.trip_id}>
-                    <td>{t.headsign ?? "—"}</td>
-                    <td>
-                      <button
-                        className="link"
-                        aria-pressed={stop?.id === t.next_stop.stop_id}
-                        onClick={() => setStop({ id: t.next_stop.stop_id, name: t.next_stop.name ?? t.next_stop.stop_id })}
-                      >
-                        {t.next_stop.name ?? t.next_stop.stop_id}
-                      </button>
-                    </td>
-                    <td>{delay(t.next_stop.delay_s)}</td>
-                    <td className={t.next_stop.status}>{STATUS[t.next_stop.status]}</td>
-                  </tr>
+            <div className="trips">
+              {/* Earliest start first; a train the timetable lacks goes last. */}
+              {[...now.trips]
+                .sort((a, b) => (a.start?.scheduled ?? "~").localeCompare(b.start?.scheduled ?? "~"))
+                .map((t) => (
+                  <TripRow key={`${t.service_date} ${t.trip_id}`} trip={t} refreshed={now} onStop={setStop} />
                 ))}
-              </tbody>
-            </table>
+            </div>
           )}
         </section>
       )}
@@ -244,7 +208,7 @@ export default function Page() {
             {stop && <button onClick={() => setStop(null)}>Whole line</button>}
           </div>
           {tally && <StatusPie tally={tally} />}
-          <p className="muted small">Pick a next stop in the table to see that stop&apos;s history on this line.</p>
+          <p className="muted small">Open a train and pick one of its stops to see that stop&apos;s history on this route.</p>
         </section>
       )}
 
