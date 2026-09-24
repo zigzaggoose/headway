@@ -59,9 +59,11 @@ run is in `deploy/vm-bootstrap.md`; update with `git pull` and `docker compose
 
 ## Stage 4: decided, in progress
 
-1. **`prometheus/client_golang` approved** (2026-09-24). Next: `/metrics` on the
-   private admin port, every §10.3 metric under the `transitlateagain_` prefix.
-   Needs its §15 dependency row.
+1. **`/metrics` is live** (`117e553`) on the admin port only: every §10.3
+   metric, 22 families visible on the first scrape (the other five appear on
+   their first event). Read it with
+   `ssh root@119.42.55.16 curl -s localhost:8081/metrics`. Memory unchanged
+   (236 MB service). The first scrape exposed the schedule 502 bug below.
 2. **Grafana Cloud:** the user is creating the account. Plan: Grafana Alloy on
    the VM pushing out, so `/metrics` stays private. Measure Alloy's memory
    first (~220 MB free). The Grafana token is a secret: it goes into a file on
@@ -77,6 +79,10 @@ run is in `deploy/vm-bootstrap.md`; update with `git pull` and `docker compose
    (`headway_pgdata`) keep the old name on purpose (§15).
 
 ## Found and fixed this session
+
+- **Schedule refreshes always failed after the first load** (`868941c`): TfNSW
+  answers an unchanged `If-Modified-Since` with 502, not 304. Downloads are
+  unconditional now; the content hash makes an unchanged bundle a no-op.
 
 - **§9.1 case 18**: the producers keep finished trips and served stops, and
   `/now` reported 21 % ghost trips, all "on time". The cache now drops a stop 5
