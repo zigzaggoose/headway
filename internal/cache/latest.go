@@ -71,9 +71,11 @@ func New(ttl time.Duration, now func() time.Time) *Cache {
 // servedAfter is how far behind the feed's own timestamp a stop's predicted
 // time must fall before the stop counts as served. The TfNSW producers keep
 // finished trips, and some keep a trip's served stops ahead of the next one
-// (§9.1 case 18); a live prediction is re-estimated every poll, so one ten
-// minutes stale has stopped being a prediction.
-const servedAfter = 10 * time.Minute
+// (§9.1 case 18). Five minutes because that is where the live data splits:
+// trips whose first listed stop really was next sat 0–5 minutes past it (27
+// of them), with only 5 in the next five minutes; ten let a trip show the
+// stop it had just left (58 of 643 did).
+const servedAfter = 5 * time.Minute
 
 // Update replaces feedID's trips with those in obs, one poll's worth. The
 // snapshot is built before the lock is taken, so readers wait only for a

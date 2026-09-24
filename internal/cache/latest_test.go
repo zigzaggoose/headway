@@ -202,8 +202,8 @@ func TestUpdate_ServedStops_AreNotNextStopsOrCalls(t *testing.T) {
 		at("trip-a", "stop-2", -20*time.Minute, 0),
 		at("trip-a", "stop-3", 5*time.Minute, 0),
 		at("trip-done", "stop-3", -3*time.Hour, 0),
-		at("trip-late", "stop-2", -30*time.Minute, 25*60),
-		at("trip-edge", "stop-2", -10*time.Minute, 0),
+		at("trip-late", "stop-2", -30*time.Minute, 27*60),
+		at("trip-edge", "stop-2", -5*time.Minute, 0),
 		unmatched,
 	})
 
@@ -225,10 +225,10 @@ func TestUpdate_ServedStops_AreNotNextStopsOrCalls(t *testing.T) {
 	})
 	t.Run("a late trip is judged by its predicted time, not its scheduled one", func(t *testing.T) {
 		if next["trip-late"] != "stop-2" {
-			t.Errorf("next stop = %q, want stop-2: 30 min late on the timetable, 25 min of delay", next["trip-late"])
+			t.Errorf("next stop = %q, want stop-2: 30 min behind the timetable, 27 min of delay", next["trip-late"])
 		}
 	})
-	t.Run("a stop exactly ten minutes behind is not yet served", func(t *testing.T) {
+	t.Run("a stop exactly five minutes behind is not yet served", func(t *testing.T) {
 		if next["trip-edge"] != "stop-2" {
 			t.Errorf("next stop = %q, want stop-2", next["trip-edge"])
 		}
