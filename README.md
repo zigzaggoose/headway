@@ -17,8 +17,14 @@ Stages 1–2 are complete and Stage 3 is nearly so (`PROJECT.md` §12). Five
 feeds — Sydney Trains, Metro, Sydney Ferries and both light rail lines — are
 polled every 15 s, matched against their daily timetables, stored, rolled up
 hourly and served. Buses are left off: they would not fit the 1 GB VM
-(`docs/quota.md`). Not yet deployed: the hosting is chosen (a BinaryLane VM in
-Sydney) and `deploy/` is ready for it.
+(`docs/quota.md`).
+
+**Live since 2026-09-24** on a BinaryLane VM in Sydney
+(`deploy/vm-bootstrap.md`):
+[`/v1/lines/IWL_1a/now`](http://119.42.55.16:8080/v1/lines/IWL_1a/now) is
+what the T2 is doing right now.
+
+![The live /v1/lines/IWL_1a/now response for the T2 at 12:21 on 2026-09-24](docs/img/now.png)
 
 ## How it works
 
@@ -83,6 +89,10 @@ curl localhost:8080/v1/stops/2020102/now?window_min=30         # departures from
 curl "localhost:8080/v1/lines/APS_1a/history?from=2026-09-20&bucket=day"
 curl localhost:8080/readyz
 ```
+
+Swap `localhost:8080` for `119.42.55.16:8080` to ask the live service. It
+allows 10 requests a second per client. `/v1/admin/stats` is not on the
+public port; it listens on `ADMIN_ADDR`, which the VM keeps on loopback.
 
 Route and stop ids are TfNSW's own (`APS_1a` is one T8 pattern; `2020102` is
 International Station, Platform 2). `PROJECT.md` §7 is the contract, including

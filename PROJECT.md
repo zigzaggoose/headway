@@ -1499,7 +1499,7 @@ Each stage ends in something that runs and can be demonstrated. **Stage 2 is the
 - [x] Ordered graceful shutdown per §9.4. All six steps in `main`; a live SIGINT drained HTTP, flushed the writer and exited 0 with 0 rows lost.
 - [x] `deploy/Dockerfile` (amd64, distroless) and `deploy/docker-compose.yml`. 23.9 MB image; `make up` from an empty volume migrates and reports ready; `docker compose stop` drains and exits 0; a `linux/amd64` build verified from the arm64 laptop.
 - [x] BinaryLane VM provisioned; `deploy/vm-bootstrap.md` written while doing it, not after. 2026-09-24: Standard 1 GB, Sydney, Ubuntu 24.04, key-only SSH, 2 GB swap. First start on an empty volume: ready in under 80 s, all five schedules loaded, 17,767 rows written, 0 dropped, `default_partition_rows` 0; 236 MB (service) + 181 MB (Postgres) resident.
-- [ ] Deployed and reachable. Screenshot of a live `/v1/lines/{id}/now` response in the README.
+- [x] Deployed and reachable. Screenshot of a live `/v1/lines/{id}/now` response in the README. 2026-09-24, `http://119.42.55.16:8080`; `docs/img/now.png` is the T2 (`IWL_1a`) at 12:21. Taking it found §9.1 case 18: the first screenshot showed trains whose "next stop" was hours past.
 - **Demo:** "this URL shows what the T1 is doing right now, and it has been running since Tuesday."
 
 ### Stage 2 — Schedule matching, history, CI (stopping point)
