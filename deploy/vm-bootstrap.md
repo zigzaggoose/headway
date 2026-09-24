@@ -4,7 +4,8 @@ The commands that built the production VM on 2026-09-24, in the order they ran.
 Rebuilding from scratch means running them again; nothing else was done by hand.
 
 **Server:** BinaryLane Standard, Sydney, 1 vCPU, 1 GB, 20 GB, Ubuntu 24.04 LTS,
-no backups. Hostname `transitlateagain`, IPv4 `119.42.55.16`.
+no backups. Hostname `headway` (the project's first name; the hostname
+was never changed), IPv4 `119.42.55.16`.
 
 ## 1. SSH key (laptop)
 
@@ -131,6 +132,28 @@ Measured from a laptop on 2026-09-24: of 120 new connections opened 60 at a
 time, the `DROP` rule took 33, and the next request went straight through. 25
 concurrent `/v1/lines` requests gave 10 × 200, 10 × 429 from the application
 limit and 5 dropped.
+
+## 7. The rename (2026-09-24, from `headway`)
+
+The steps above use the new names. The VM was built under the old ones and
+switched over like this, with the data kept: the Compose file pins the
+volume to `headway_pgdata`, and the Postgres role and database are still
+`headway`. About a minute without ingest.
+
+```sh
+cd /opt/headway && git pull
+docker compose --env-file .env -f deploy/docker-compose.yml build   # while the old stack runs
+docker compose -p headway --env-file .env -f deploy/docker-compose.yml down --remove-orphans
+systemctl disable --now headway-firewall && rm /etc/systemd/system/headway-firewall.service
+iptables -D DOCKER-USER -i eth0 -p tcp --dport 8080 -j HEADWAY-LIMIT
+iptables -F HEADWAY-LIMIT && iptables -X HEADWAY-LIMIT
+mv /opt/headway /opt/transitlateagain && cd /opt/transitlateagain
+docker compose --env-file .env -f deploy/docker-compose.yml up -d
+# then the unit from step 6, under its new name
+```
+
+Checked afterwards: 143,231 observations with the earliest still at 11:53
+(131,566 just before), ingest resumed with 0 dropped, `/readyz` 200.
 
 ## Updating
 
