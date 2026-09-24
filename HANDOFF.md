@@ -24,7 +24,7 @@ terminator line (`EOF`) ends early — pick a terminator the body cannot contain
 | 1 — MVP | **Complete.** Live at `https://transitlateagain.dev` since 2026-09-24 11:53. |
 | 2 — Matching, history, CI | **Complete.** |
 | 3 — All modes, scale, load test | Complete except **storage over a full day** (below). |
-| 4 — Observability, front end | Not started. Decisions waiting on the user (below). |
+| 4 — Observability, front end | **Complete.** |
 
 ## Production
 
@@ -57,21 +57,23 @@ run is in `deploy/vm-bootstrap.md`; update with `git pull` and `docker compose
    Polls succeed, so nothing is wrong on our side. If it is still empty after a
    few days, record it in §9.1.
 
-## Stage 4
+## Stage 4: complete (2026-09-24)
 
-- **Done:** `/metrics` (admin port only) and Grafana Cloud via Alloy on the
-  VM; `https://transitlateagain.dev` through Cloudflare in Full (strict), with
-  only Cloudflare's ranges admitted to the API port. `vm-bootstrap.md` §6 has
-  every step.
-- **Next:** one dashboard (ingest rate, freshness p95, match rate, queue
-  length, partitions, API p95), then the `IngestStopped` alert with a
-  `docs/runbook.md` entry, then `web/`. The dashboard and alert are built in
-  the Grafana UI by the user; the queries are §10.3/§10.4.
+- **Site:** https://transitlateagain.dev — `web/`, Next.js 16 static export on
+  Cloudflare **Pages** (project `transitlateagain`, root `web`, build
+  `npm run build`, output `out`, `NODE_VERSION=22`), rebuilt on every push.
+- **API:** https://api.transitlateagain.dev — the VM behind Cloudflare, Full
+  (strict), origin cert, only Cloudflare's ranges admitted. CORS allows
+  exactly `https://transitlateagain.dev` (`HTTP_CORS_ORIGIN`).
+- **Metrics:** `/metrics` on the admin port → Alloy → Grafana Cloud. Dashboard
+  from `deploy/grafana-dashboard.json` (a V1 dashboard resource; classic JSON
+  is called "old format" by Grafana 12.2+). Alert
+  `TransitLateAgainIngestStopped`, runbook in `docs/runbook.md`; delivery
+  tested, not fired by stopping ingestion (the user's choice).
 - **Every VM Compose command needs both files:**
   `docker compose --env-file .env -f deploy/docker-compose.yml -f deploy/docker-compose.vm.yml ...`
-- **Secrets pasted into this session's transcript:** a read-only Grafana token
-  (delete it in Grafana → Access Policies) and the Alloy write token now in
-  use (rotate if the transcript is shared). The origin key never left the VM.
+- **Secrets pasted into this session's transcript:** the Alloy write token
+  (the read-only one is deleted). Rotate if the transcript is shared.
 - `/v1/admin/stats` and `/metrics`: `ssh root@119.42.55.16 curl -s localhost:8081/...`
 
 ## Found and fixed this session

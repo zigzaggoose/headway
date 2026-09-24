@@ -13,19 +13,25 @@ and the realtime feed is not archived anywhere queryable. Transit Late Again cap
 
 ## Status
 
-Stages 1–2 are complete and Stage 3 is nearly so (`PROJECT.md` §12). Five
+Stages 1, 2 and 4 are complete; Stage 3 lacks only a full day's storage measurement (`PROJECT.md` §12). Five
 feeds — Sydney Trains, Metro, Sydney Ferries and both light rail lines — are
 polled every 15 s, matched against their daily timetables, stored, rolled up
 hourly and served. Buses are left off: they would not fit the 1 GB VM
 (`docs/quota.md`).
 
-**Live since 2026-09-24** on a BinaryLane VM in Sydney
-(`deploy/vm-bootstrap.md`):
-[`transitlateagain.dev/v1/lines/IWL_1a/now`](https://transitlateagain.dev/v1/lines/IWL_1a/now)
-is what the T2 is doing right now. Cloudflare sits in front; metrics go to
-Grafana Cloud.
+**Live since 2026-09-24** at **[transitlateagain.dev](https://transitlateagain.dev)**:
+pick a line to see what it is doing right now and how often it has been on
+time. The site (`web/`, Next.js on Cloudflare Pages) reads the public API at
+[`api.transitlateagain.dev`](https://api.transitlateagain.dev/v1/lines),
+which runs on a BinaryLane VM in Sydney behind Cloudflare
+(`deploy/vm-bootstrap.md`); metrics go to Grafana Cloud.
 
-![The live /v1/lines/IWL_1a/now response for the T2 at 14:21 on 2026-09-24](docs/img/now.png)
+![transitlateagain.dev showing the T2's running trains and its on-time history, 2026-09-24](docs/img/site.png)
+
+The same data from the API:
+[`/v1/lines/IWL_1a/now`](https://api.transitlateagain.dev/v1/lines/IWL_1a/now).
+
+![The live /v1/lines/IWL_1a/now response for the T2 at 15:42 on 2026-09-24](docs/img/now.png)
 
 ## How it works
 
@@ -91,7 +97,7 @@ curl "localhost:8080/v1/lines/APS_1a/history?from=2026-09-20&bucket=day"
 curl localhost:8080/readyz
 ```
 
-Swap `localhost:8080` for `https://transitlateagain.dev` to ask the live
+Swap `localhost:8080` for `https://api.transitlateagain.dev` to ask the live
 service. It allows 10 requests a second per client. `/v1/admin/stats` is not on the
 public port; it listens on `ADMIN_ADDR`, which the VM keeps on loopback.
 
