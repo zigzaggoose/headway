@@ -1,8 +1,8 @@
 // node --test app/lines.test.ts — real names from the live /v1/lines.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import type { Line } from "./api.ts";
-import { reverseOf, samePattern, tally } from "./lines.ts";
+import type { Line, Status, Trip } from "./api.ts";
+import { reverseOf, samePattern, shown, tally } from "./lines.ts";
 
 const line = (route_id: string, short_name: string, long_name: string): Line => ({
   route_id,
@@ -83,4 +83,33 @@ test("routes with one name are one pattern, whatever TfNSW's padding", () => {
     samePattern(lines.find((l) => l.route_id === "IWL_2b")!, lines).map((l) => l.route_id),
     ["IWL_2a", "IWL_2b"],
   );
+});
+
+const trip = (trip_id: string, from: string, to: string, next: string, status: Status): Trip => ({
+  trip_id,
+  service_date: "2026-09-25",
+  start: { stop_id: "a", name: `${from} Station Platform 1`, scheduled: null },
+  end: { stop_id: "b", name: `${to} Station Platform 2`, scheduled: null },
+  matched: true,
+  next_stop: { stop_id: "c", name: `${next} Station Platform 3`, delay_s: 0, status },
+});
+const trips = [
+  trip("1", "Hornsby", "Central", "Chatswood", "on_time"),
+  trip("2", "Central", "Hornsby", "Wynyard", "very_late"),
+  trip("3", "Berowra", "Central", "Gordon", "late"),
+  trip("4", "Hornsby", "Berowra", "Hornsby", "cancelled"),
+];
+const ids = (ts: Trip[]) => ts.map((t) => t.trip_id);
+
+test("shown narrows by status, late taking very late too", () => {
+  assert.deepEqual(ids(shown(trips, "", "all")), ["1", "2", "3", "4"]);
+  assert.deepEqual(ids(shown(trips, "", "late")), ["2", "3"]);
+  assert.deepEqual(ids(shown(trips, "", "cancelled")), ["4"]);
+});
+
+test("shown needs every searched word in some station, any case", () => {
+  assert.deepEqual(ids(shown(trips, "hornsby CENTRAL", "all")), ["1", "2"]);
+  assert.deepEqual(ids(shown(trips, "  gordon ", "all")), ["3"]);
+  assert.deepEqual(ids(shown(trips, "hornsby", "late")), ["2"]);
+  assert.deepEqual(ids(shown(trips, "parramatta", "all")), []);
 });

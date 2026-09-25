@@ -1,4 +1,4 @@
-import type { History, Line, Now } from "./api";
+import type { History, Line, Now, Trip } from "./api";
 
 // TfNSW has no route that is "T1": it publishes one route_id per stopping
 // pattern and direction ("City to Emu Plains", "Emu Plains to Berowra via City"
@@ -82,4 +82,19 @@ export function tally(hs: History[]): Tally {
     t.cancelled += b.n_cancelled;
   }
   return t;
+}
+
+// Filter is a summary count the trip list can be narrowed to; late takes very late too.
+export type Filter = "all" | "on_time" | "late" | "early" | "cancelled";
+
+// shown is the trips with status f whose stations contain every word of q:
+// "central late" is not a status search, "hornsby central" finds trains between them.
+export function shown(trips: Trip[], q: string, f: Filter): Trip[] {
+  const words = q.toLowerCase().split(/\s+/).filter(Boolean);
+  return trips.filter((t) => {
+    const s = t.next_stop.status;
+    if (f !== "all" && s !== f && !(f === "late" && s === "very_late")) return false;
+    const text = [t.start?.name, t.end?.name, t.next_stop.name, t.headsign].join(" ").toLowerCase();
+    return words.every((w) => text.includes(w));
+  });
 }

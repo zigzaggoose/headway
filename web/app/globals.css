@@ -44,7 +44,7 @@ body {
 }
 
 main {
-  max-width: 760px;
+  max-width: 1200px;
   margin: 0 auto;
   padding: 24px 16px 48px;
 }
@@ -267,6 +267,68 @@ button.link[aria-pressed="true"] {
 .pie .early { --fill: var(--pie-early); fill: var(--fill); }
 .pie .late { --fill: var(--pie-late); fill: var(--fill); }
 .pie .cancelled { --fill: var(--pie-cancelled); fill: var(--fill); }
+
+.picker {
+  max-width: 640px;
+}
+
+/* History on the left, the live list on the right; stacked on a phone. */
+.board {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+  gap: 0 48px;
+  align-items: start;
+}
+
+@media (max-width: 900px) {
+  .board {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.summary button {
+  padding: 2px 8px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: none;
+  cursor: pointer;
+}
+
+.summary button[aria-pressed="true"] {
+  border-color: currentColor;
+}
+
+input[type="search"] {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg);
+  font: inherit;
+  color: inherit;
+}
+
+/* The list scrolls in place so it never takes the whole page. */
+.trips {
+  max-height: 65vh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* Full screen: the live section covers the window, the list uncapped. */
+.live.full {
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+  overflow-y: auto;
+  padding: 0 24px 24px;
+  background: var(--bg);
+}
+
+.live.full .trips {
+  max-height: none;
+}
 
 footer {
   margin-top: 48px;

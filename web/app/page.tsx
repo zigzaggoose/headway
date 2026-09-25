@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { API, get, type History, type Line, type Now } from "./api";
 import { StatusPie } from "./chart";
-import { mergeNow, name, reverseOf, samePattern, tally as sum, type Tally } from "./lines";
+import { mergeNow, name, reverseOf, samePattern, shown, tally as sum, type Filter, type Tally } from "./lines";
 import { TripRow } from "./trip";
 
 // route_type, as TfNSW's bundles use it, to the name a rider would pick from.
@@ -19,6 +19,9 @@ export default function Page() {
   const [bucket, setBucket] = useState<"hour" | "day">("day");
   const [tally, setTally] = useState<Tally | null>(null);
   const [error, setError] = useState("");
+  const [query, setQuery] = useState("");
+  const [filter, setFilter] = useState<Filter>("all");
+  const [full, setFull] = useState(false);
 
   const line = lines.find((l) => l.route_id === routeID);
   // Every route shown as the selected one; its first is the one in the menu.
@@ -38,6 +41,8 @@ export default function Page() {
     setStop(null);
     setNow(null);
     setTally(null);
+    setQuery("");
+    setFilter("all");
     setRouteID(id);
   };
 
@@ -102,52 +107,77 @@ export default function Page() {
     return groups;
   }, [lines]);
 
+  // Esc leaves full screen, as it does a native one.
+  useEffect(() => {
+    if (!full) return;
+    const esc = (e: KeyboardEvent) => e.key === "Escape" && setFull(false);
+    addEventListener("keydown", esc);
+    return () => removeEventListener("keydown", esc);
+  }, [full]);
+
+  const filters: [Filter, string, number][] = now
+    ? [
+        ["all", "running", now.summary.active_trips],
+        ["on_time", "on time", now.summary.on_time],
+        ["late", "late", now.summary.late + now.summary.very_late],
+        ["early", "early", now.summary.early],
+        ["cancelled", "cancelled", now.summary.cancelled],
+      ]
+    : [];
+  const listed = now
+    ? // Earliest start first; a train the timetable lacks goes last.
+      shown(now.trips, query, filter).sort((a, b) =>
+        (a.start?.scheduled ?? "~").localeCompare(b.start?.scheduled ?? "~"),
+      )
+    : [];
 
   return (
     <main>
-      <header>
-        <h1>Transit Late Again</h1>
-        <p className="muted">
-          Live running and on-time history for Sydney&apos;s trains, metro, ferries and light rail, measured from
-          Transport for NSW&apos;s realtime feeds.
-        </p>
-      </header>
+      <div className="picker">
+        <header>
+          <h1>Transit Late Again</h1>
+          <p className="muted">
+            Live running and on-time history for Sydney&apos;s trains, metro, ferries and light rail, measured from
+            Transport for NSW&apos;s realtime feeds.
+          </p>
+        </header>
 
-      <label htmlFor="line">Line</label>
-      <select
-        id="line"
-        value={line?.short_name ?? ""}
-        onChange={(e) => pick(lines.find((l) => l.short_name === e.target.value)?.route_id ?? "")}
-      >
-        <option value="">Choose a line…</option>
-        {[...byMode].map(([mode, names]) => (
-          <optgroup key={mode} label={mode}>
-            {[...names].map(([name, ls]) => (
-              <option key={name} value={name}>
-                {ls.length === 1 ? `${name} · ${ls[0].long_name}` : name}
-              </option>
-            ))}
-          </optgroup>
-        ))}
-      </select>
+        <label htmlFor="line">Line</label>
+        <select
+          id="line"
+          value={line?.short_name ?? ""}
+          onChange={(e) => pick(lines.find((l) => l.short_name === e.target.value)?.route_id ?? "")}
+        >
+          <option value="">Choose a line…</option>
+          {[...byMode].map(([mode, names]) => (
+            <optgroup key={mode} label={mode}>
+              {[...names].map(([name, ls]) => (
+                <option key={name} value={name}>
+                  {ls.length === 1 ? `${name} · ${ls[0].long_name}` : name}
+                </option>
+              ))}
+            </optgroup>
+          ))}
+        </select>
 
-      {patterns.length > 1 && (
-        <>
-          <label htmlFor="route">Route</label>
-          <select id="route" value={same[0]?.route_id} onChange={(e) => pick(e.target.value)}>
-            {patterns.map((l) => (
-              <option key={l.route_id} value={l.route_id}>
-                {name(l)}
-              </option>
-            ))}
-          </select>
-          {reverse && (
-            <div className="controls reverse">
-              <button onClick={() => pick(reverse.route_id)}>⇄ Reverse: {name(reverse)}</button>
-            </div>
-          )}
-        </>
-      )}
+        {patterns.length > 1 && (
+          <>
+            <label htmlFor="route">Route</label>
+            <select id="route" value={same[0]?.route_id} onChange={(e) => pick(e.target.value)}>
+              {patterns.map((l) => (
+                <option key={l.route_id} value={l.route_id}>
+                  {name(l)}
+                </option>
+              ))}
+            </select>
+            {reverse && (
+              <div className="controls reverse">
+                <button onClick={() => pick(reverse.route_id)}>⇄ Reverse: {name(reverse)}</button>
+              </div>
+            )}
+          </>
+        )}
+      </div>
 
       {error && (
         <p role="alert" className="error">
@@ -155,62 +185,67 @@ export default function Page() {
         </p>
       )}
 
-      {line && now && (
-        <section aria-labelledby="now">
-          <h2 id="now">
-            {title} right now
-            {now.feed_age_s !== null && <span className="muted"> · data {now.feed_age_s} s old</span>}
-          </h2>
-          <ul className="summary">
-            <li>
-              <b>{now.summary.active_trips}</b> running
-            </li>
-            <li className="on_time">
-              <b>{now.summary.on_time}</b> on time
-            </li>
-            <li className="late">
-              <b>{now.summary.late + now.summary.very_late}</b> late
-            </li>
-            <li className="early">
-              <b>{now.summary.early}</b> early
-            </li>
-            <li className="cancelled">
-              <b>{now.summary.cancelled}</b> cancelled
-            </li>
-          </ul>
-          {now.trips.length === 0 ? (
-            <p className="muted">Nothing running on this line right now.</p>
-          ) : (
-            <div className="trips">
-              {/* Earliest start first; a train the timetable lacks goes last. */}
-              {[...now.trips]
-                .sort((a, b) => (a.start?.scheduled ?? "~").localeCompare(b.start?.scheduled ?? "~"))
-                .map((t) => (
+      <div className="board">
+        {line && (
+          <section aria-labelledby="history">
+            <h2 id="history">On time {stop ? `at ${stop.name}` : `on ${title}`}</h2>
+            <div className="controls">
+              <button aria-pressed={bucket === "day"} onClick={() => setBucket("day")}>
+                Last 14 days
+              </button>
+              <button aria-pressed={bucket === "hour"} onClick={() => setBucket("hour")}>
+                Last 48 hours
+              </button>
+              {stop && <button onClick={() => setStop(null)}>Whole line</button>}
+            </div>
+            {tally && <StatusPie tally={tally} />}
+            <p className="muted small">
+              Open a train and pick one of its stops to see that stop&apos;s history on this route.
+            </p>
+          </section>
+        )}
+
+        {line && now && (
+          <section aria-labelledby="now" className={full ? "live full" : "live"}>
+            <h2 id="now">
+              {title} right now
+              {now.feed_age_s !== null && <span className="muted"> · data {now.feed_age_s} s old</span>}
+            </h2>
+            <ul className="summary" aria-label="Show only">
+              {filters.map(([f, label, n]) => (
+                <li key={f} className={f}>
+                  <button aria-pressed={filter === f} onClick={() => setFilter(filter === f ? "all" : f)}>
+                    <b>{n}</b> {label}
+                  </button>
+                </li>
+              ))}
+            </ul>
+            <div className="controls">
+              <input
+                type="search"
+                aria-label="Search stations"
+                placeholder="Search stations, e.g. Hornsby"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+              />
+              <button aria-pressed={full} onClick={() => setFull(!full)}>
+                {full ? "Exit full screen" : "Full screen"}
+              </button>
+            </div>
+            {now.trips.length === 0 ? (
+              <p className="muted">Nothing running on this line right now.</p>
+            ) : listed.length === 0 ? (
+              <p className="muted">No trains match.</p>
+            ) : (
+              <div className="trips">
+                {listed.map((t) => (
                   <TripRow key={`${t.service_date} ${t.trip_id}`} trip={t} refreshed={now} onStop={setStop} />
                 ))}
-            </div>
-          )}
-        </section>
-      )}
-
-      {line && (
-        <section aria-labelledby="history">
-          <h2 id="history">
-            On time {stop ? `at ${stop.name}` : `on ${title}`}
-          </h2>
-          <div className="controls">
-            <button aria-pressed={bucket === "day"} onClick={() => setBucket("day")}>
-              Last 14 days
-            </button>
-            <button aria-pressed={bucket === "hour"} onClick={() => setBucket("hour")}>
-              Last 48 hours
-            </button>
-            {stop && <button onClick={() => setStop(null)}>Whole line</button>}
-          </div>
-          {tally && <StatusPie tally={tally} />}
-          <p className="muted small">Open a train and pick one of its stops to see that stop&apos;s history on this route.</p>
-        </section>
-      )}
+              </div>
+            )}
+          </section>
+        )}
+      </div>
 
       <footer className="muted small">
         On time is up to 1 min early or 5 min late. Data: Transport for NSW Open Data. API:{" "}
