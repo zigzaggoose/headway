@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/zigzaggoose/transitlateagain/internal/gtfsrt"
 	"github.com/zigzaggoose/transitlateagain/internal/ingest"
 )
 
@@ -87,13 +88,13 @@ const servedAfter = 5 * time.Minute
 // Served stops are dropped, so a trip's next stop is its first unserved one
 // and a trip with none left is not active. The reference is feedTS, never
 // our clock, so a replay builds the same snapshot. An unmatched observation
-// has no scheduled time to judge by and is kept.
+// has no scheduled time to judge by: it is kept, unless it is a ghost.
 func (c *Cache) Update(feedID string, feedTS time.Time, obs []ingest.Observation) {
 	s := &snapshot{feedTS: feedTS, byRoute: make(map[string][]Trip), byStop: make(map[string][]Call)}
 	type tripKey struct{ serviceDate, tripID string }
 	seen := make(map[tripKey]bool)
 	for _, o := range obs {
-		if served(o, feedTS) {
+		if served(o, feedTS) || ghost(o) {
 			continue
 		}
 		s.byStop[o.StopID] = append(s.byStop[o.StopID], Call{
@@ -146,6 +147,17 @@ func (c *Cache) Stale(feedID string, polls int) bool {
 	defer c.mu.RUnlock()
 	s := c.feeds[feedID]
 	return s != nil && s.unchanged >= polls
+}
+
+// ghost reports a trip the feed says runs to the timetable, which the active
+// timetable does not have. TfNSW keeps finished trips in the feed after the
+// bundle that held them is replaced: on 2026-09-26 at 20:15, 82 of 299 train
+// trips were Friday's after-midnight services, done 18 hours before, and
+// each would stay listed until the feed let go (§9.1 case 18). ADDED,
+// cancelled and unknown relationships are kept: those legitimately lack a
+// timetable row. The observation is still stored; only "now" drops it.
+func ghost(o ingest.Observation) bool {
+	return !o.Matched && (o.TripRel == gtfsrt.TripScheduled || o.TripRel == gtfsrt.TripReplacement)
 }
 
 func served(o ingest.Observation, feedTS time.Time) bool {

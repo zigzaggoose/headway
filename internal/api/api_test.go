@@ -61,6 +61,7 @@ func obs(routeID, tripID, stopID string, delay *int32, dir *int16, rel int32) in
 		ObservedDelayS: delay,
 		DirectionID:    dir,
 		TripRel:        rel,
+		Matched:        true,
 	}
 }
 
@@ -233,7 +234,7 @@ func TestLineNow_ActiveRoute_ReturnsTripsAndSummary(t *testing.T) {
 	if first["trip_id"] != "trip-a" || next["stop_id"] != "s1" || next["delay_s"] != 30.0 || next["status"] != "on_time" {
 		t.Errorf("first trip = %v, want trip-a at its first reported stop s1, 30 s, on_time", first)
 	}
-	if first["service_date"] != "2026-09-23" || first["matched"] != false {
+	if first["service_date"] != "2026-09-23" || first["matched"] != true {
 		t.Errorf("first trip = %v", first)
 	}
 }

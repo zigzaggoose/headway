@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zigzaggoose/transitlateagain/internal/gtfsrt"
 	"github.com/zigzaggoose/transitlateagain/internal/ingest"
 )
 
@@ -24,6 +25,7 @@ func obs(feedID, routeID, tripID, stopID string, delay int32, ts time.Time) inge
 		RouteID:        routeID,
 		FeedTS:         ts,
 		ObservedDelayS: ptr(delay),
+		Matched:        true,
 	}
 }
 
@@ -196,6 +198,8 @@ func TestUpdate_ServedStops_AreNotNextStopsOrCalls(t *testing.T) {
 	}
 	unmatched := obs("trains", "R1", "trip-u", "stop-1", 0, t0)
 	unmatched.ObservedDelayS = nil
+	unmatched.Matched = false
+	unmatched.TripRel = gtfsrt.TripAdded
 	c := New(45*time.Minute, fixedClock(t0))
 	c.Update("trains", t0, []ingest.Observation{
 		at("trip-a", "stop-1", -40*time.Minute, 0),
@@ -244,6 +248,39 @@ func TestUpdate_ServedStops_AreNotNextStopsOrCalls(t *testing.T) {
 			t.Errorf("calls at stop-3 = %+v, want trip-a only", calls)
 		}
 	})
+}
+
+func TestUpdate_UnmatchedTrips_OnlyGhostsAreDropped(t *testing.T) {
+	tests := []struct {
+		name    string
+		matched bool
+		rel     int32
+		listed  bool
+	}{
+		{"an unmatched scheduled trip is a ghost", false, gtfsrt.TripScheduled, false},
+		{"an unmatched replacement trip is a ghost", false, gtfsrt.TripReplacement, false},
+		{"an added trip has no timetable row by definition and is kept", false, gtfsrt.TripAdded, true},
+		{"a cancelled trip missing from the timetable is kept", false, gtfsrt.TripCanceled, true},
+		{"an unknown relationship is kept", false, 9, true},
+		{"a matched scheduled trip is kept", true, gtfsrt.TripScheduled, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			o := obs("trains", "R1", "trip-1", "stop-1", 0, t0)
+			o.Matched, o.TripRel = tt.matched, tt.rel
+			c := New(45*time.Minute, fixedClock(t0))
+			c.Update("trains", t0, []ingest.Observation{o})
+
+			trips, _, _ := c.Route("R1")
+			calls, _, _ := c.Stop("stop-1")
+			if got := len(trips) == 1; got != tt.listed {
+				t.Errorf("trip listed on its route = %v, want %v", got, tt.listed)
+			}
+			if got := len(calls) == 1; got != tt.listed {
+				t.Errorf("call listed at its stop = %v, want %v", got, tt.listed)
+			}
+		})
+	}
 }
 
 func TestStop_AfterUpdate_ReturnsEveryCallAtTheStop(t *testing.T) {
